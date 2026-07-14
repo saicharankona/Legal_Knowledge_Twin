@@ -1,0 +1,2098 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legal Knowledge Twin</title>
+
+    <!-- Google Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+
+    <style>
+        /* ==========================================================
+   MERGED STYLESHEET (style.css + chatbot.css combined)
+========================================================== */
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background: #f5f7fb;
+            color: #1e293b;
+            overflow-x: hidden;
+            line-height: 1.6;
+        }
+
+        :root {
+            --primary: #0A2540;
+            --secondary: #1E88E5;
+            --gold: #F4C542;
+            --white: #ffffff;
+            --light: #f8fafc;
+            --text: #1f2937;
+            --shadow: 0 10px 30px rgba(0, 0, 0, .12);
+        }
+
+        /* ----------------------------------------------------------
+   PAGE SWITCHING
+---------------------------------------------------------- */
+        .page {
+            display: none;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        #page-chatbot.active {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* ----------------------------------------------------------
+   NAVBAR
+---------------------------------------------------------- */
+        .navbar {
+            width: 100%;
+            height: 85px;
+            background: var(--primary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 70px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, .2);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .logo img {
+            width: 55px;
+            height: 55px;
+            object-fit: cover;
+            /* fills the circle */
+            border-radius: 50%;
+            /* makes it circular */
+            transition: .4s;
+        }
+
+        .logo img:hover {
+            transform: rotate(-8deg);
+        }
+
+        .logo h2 {
+            color: white;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+
+        .navbar ul {
+            display: flex;
+            gap: 35px;
+            list-style: none;
+        }
+
+        .navbar ul li a,
+        .nav-links li a {
+            text-decoration: none;
+            color: white;
+            font-weight: 500;
+            transition: .3s;
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-size: 16px;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .navbar ul li a:hover,
+        .nav-links li a:hover {
+            color: var(--gold);
+        }
+
+        .navbar .active,
+        .nav-links .active {
+            color: var(--gold) !important;
+        }
+
+        .btn {
+            background: var(--gold);
+            color: black;
+            padding: 12px 28px;
+            border-radius: 40px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: .3s;
+            border: none;
+            cursor: pointer;
+            font-family: 'Poppins', sans-serif;
+            font-size: 16px;
+        }
+
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: var(--shadow);
+        }
+
+        /* ----------------------------------------------------------
+   HERO SECTION
+---------------------------------------------------------- */
+        .hero {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 80px 90px;
+            min-height: 90vh;
+            background: linear-gradient(to right, #eef5ff, #ffffff);
+        }
+
+        .hero-content {
+            width: 50%;
+        }
+
+        .hero-content h1 {
+            font-size: 56px;
+            color: var(--primary);
+            margin-bottom: 25px;
+            line-height: 1.2;
+        }
+
+        .hero-content p {
+            font-size: 19px;
+            color: #555;
+            margin-bottom: 35px;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 20px;
+        }
+
+        .primary-btn {
+            background: var(--secondary);
+            color: white;
+            padding: 15px 35px;
+            text-decoration: none;
+            border-radius: 40px;
+            font-weight: 600;
+            transition: .3s;
+            border: none;
+            cursor: pointer;
+            font-family: 'Poppins', sans-serif;
+            font-size: 16px;
+        }
+
+        .primary-btn:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--shadow);
+        }
+
+        .secondary-btn {
+            border: 2px solid var(--secondary);
+            color: var(--secondary);
+            text-decoration: none;
+            padding: 15px 35px;
+            border-radius: 40px;
+            font-weight: 600;
+            transition: .3s;
+            background: none;
+            cursor: pointer;
+            font-family: 'Poppins', sans-serif;
+            font-size: 16px;
+        }
+
+        .secondary-btn:hover {
+            background: var(--secondary);
+            color: white;
+            transform: translateY(-5px);
+        }
+
+        .hero-image {
+            width: 45%;
+            display: flex;
+            justify-content: center;
+        }
+
+        .hero-image img {
+            width: 100%;
+            /* fills the container */
+            max-width: 450px;
+            /* adjust max size as needed */
+            height: auto;
+            /* keeps aspect ratio */
+            transform: scale(1.05);
+            /* subtle zoom instead of heavy stretch */
+            transform-origin: center;
+            animation: float 4s ease-in-out infinite;
+            transition: .4s;
+        }
+
+
+        .hero-image img:hover {
+            transform: scale(1.2);
+        }
+
+        @keyframes float {
+            0% {
+                transform: translateY(0) scale(1.15);
+            }
+
+            50% {
+                transform: translateY(-18px) scale(1.15);
+            }
+
+            100% {
+                transform: translateY(0) scale(1.15);
+            }
+        }
+
+        /* ----------------------------------------------------------
+   SECTION TITLES
+---------------------------------------------------------- */
+        .features,
+        .topics,
+        .steps,
+        .contact-section {
+            padding: 90px 80px;
+        }
+
+        .features h2,
+        .topics h2,
+        .steps h2 {
+            text-align: center;
+            font-size: 40px;
+            color: var(--primary);
+            margin-bottom: 15px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 50px;
+        }
+
+        /* ----------------------------------------------------------
+   FEATURE CARDS
+---------------------------------------------------------- */
+        .feature-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 30px;
+            margin-top: 50px;
+        }
+
+        .feature-card {
+            background: #fff;
+            border-radius: 18px;
+            padding: 35px;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, .08);
+            transition: .4s ease;
+            cursor: pointer;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 18px 35px rgba(0, 0, 0, .18);
+        }
+
+        .feature-card i,
+        .feature-icon {
+            font-size: 55px;
+            color: var(--secondary);
+            margin-bottom: 20px;
+        }
+
+        .feature-card:hover i {
+            transform: scale(1.15);
+        }
+
+        .feature-card h3 {
+            color: var(--primary);
+            margin-bottom: 15px;
+            font-size: 24px;
+        }
+
+        .feature-card p {
+            color: #666;
+            font-size: 16px;
+            line-height: 1.7;
+        }
+
+        /* ----------------------------------------------------------
+   TOPIC GRID
+---------------------------------------------------------- */
+        .topic-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 25px;
+            margin-top: 50px;
+        }
+
+        .topic-card {
+            background: white;
+            border-left: 6px solid var(--gold);
+            padding: 28px;
+            border-radius: 15px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, .08);
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--primary);
+            transition: .35s ease;
+            cursor: pointer;
+        }
+
+        .topic-card:hover {
+            transform: translateY(-8px);
+            background: var(--secondary);
+            color: white;
+            border-left: 6px solid var(--gold);
+        }
+
+        /* ----------------------------------------------------------
+   STEPS
+---------------------------------------------------------- */
+        .step-box {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 35px;
+            margin-top: 60px;
+        }
+
+        .step {
+            width: 220px;
+            background: white;
+            border-radius: 20px;
+            padding: 35px;
+            text-align: center;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, .08);
+            transition: .4s ease;
+        }
+
+        .step:hover {
+            transform: translateY(-10px);
+        }
+
+        .step span {
+            width: 65px;
+            height: 65px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: var(--secondary);
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+            border-radius: 50%;
+            margin: auto;
+            margin-bottom: 25px;
+        }
+
+        .step h3 {
+            color: var(--primary);
+            font-size: 21px;
+        }
+
+        /* ----------------------------------------------------------
+   CTA SECTION
+---------------------------------------------------------- */
+        .cta {
+            margin: 80px;
+            border-radius: 25px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            padding: 70px;
+            text-align: center;
+        }
+
+        .cta h2 {
+            font-size: 42px;
+            margin-bottom: 20px;
+        }
+
+        .cta p {
+            font-size: 18px;
+            margin-bottom: 35px;
+        }
+
+        .cta .primary-btn {
+            background: var(--gold);
+            color: black;
+        }
+
+        /* ----------------------------------------------------------
+   CONTACT PAGE
+---------------------------------------------------------- */
+        .contact-container {
+            display: flex;
+            justify-content: space-between;
+            gap: 50px;
+            flex-wrap: wrap;
+        }
+
+        .contact-info {
+            flex: 1;
+        }
+
+        .contact-info h2 {
+            color: var(--primary);
+            font-size: 35px;
+            margin-bottom: 20px;
+        }
+
+        .contact-info p {
+            margin-bottom: 30px;
+            color: #666;
+        }
+
+        .info-box {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 25px;
+            font-size: 18px;
+        }
+
+        .info-box i {
+            color: var(--secondary);
+            font-size: 24px;
+        }
+
+        .contact-form {
+            flex: 1;
+            background: white;
+            padding: 35px;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, .08);
+        }
+
+        .contact-form input,
+        .contact-form textarea {
+            width: 100%;
+            padding: 15px;
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            outline: none;
+            font-size: 16px;
+        }
+
+        .contact-form textarea {
+            resize: none;
+        }
+
+        .contact-form button {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            background: var(--secondary);
+            color: white;
+            font-size: 18px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: .3s;
+        }
+
+        .contact-form button:hover {
+            background: var(--primary);
+        }
+
+        /* ----------------------------------------------------------
+   SOCIAL ICONS
+---------------------------------------------------------- */
+        .social-icons {
+            display: flex;
+            gap: 18px;
+            margin-top: 25px;
+        }
+
+        .social-icons i {
+            width: 48px;
+            height: 48px;
+            background: var(--secondary);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 50%;
+            font-size: 20px;
+            cursor: pointer;
+            transition: .3s;
+        }
+
+        .social-icons i:hover {
+            background: var(--gold);
+            color: black;
+        }
+
+        /* ----------------------------------------------------------
+   FOOTER (marketing pages)
+---------------------------------------------------------- */
+        .page>footer {
+            background: var(--primary);
+            color: white;
+            text-align: center;
+            padding: 60px 20px;
+            margin-top: 80px;
+        }
+
+        .footer-content img {
+            width: 90px;
+            margin-bottom: 20px;
+            transition: .4s;
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 8px;
+            padding: 2px;
+        }
+
+        .footer-content h2 {
+            margin-bottom: 10px;
+        }
+
+        .footer-content p {
+            color: #ddd;
+            margin: 10px 0;
+        }
+
+        /* ----------------------------------------------------------
+   ABOUT PAGE
+---------------------------------------------------------- */
+        .about-hero {
+            min-height: 70vh;
+        }
+
+        .about-hero .hero-content {
+            width: 55%;
+        }
+
+        .about-hero .hero-image {
+            width: 40%;
+        }
+
+        .about-hero .hero-image img {
+            width: 650px;
+            height: 600px;
+            max-width: none;
+            object-fit: contain;
+            transform: none;
+            animation: none;
+        }
+
+        /* ----------------------------------------------------------
+   SCROLLBAR / SELECTION
+---------------------------------------------------------- */
+        ::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #e9eef7;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--secondary);
+            border-radius: 20px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--primary);
+        }
+
+        ::selection {
+            background: var(--secondary);
+            color: white;
+        }
+
+        input,
+        textarea,
+        button {
+            font-family: 'Poppins', sans-serif;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        /* ----------------------------------------------------------
+   RESPONSIVE - MARKETING PAGES
+---------------------------------------------------------- */
+        @media(max-width:1024px) {
+            .navbar {
+                padding: 20px 40px;
+            }
+
+            .hero {
+                flex-direction: column;
+                text-align: center;
+                padding: 60px 40px;
+            }
+
+            .hero-content {
+                width: 100%;
+            }
+
+            .hero-image {
+                width: 100%;
+                margin-top: 40px;
+            }
+
+            .hero-content h1 {
+                font-size: 45px;
+            }
+
+            .buttons {
+                justify-content: center;
+            }
+
+            .contact-container {
+                flex-direction: column;
+            }
+        }
+
+        @media(max-width:768px) {
+            .navbar {
+                flex-direction: column;
+                height: auto;
+                padding: 20px;
+                gap: 20px;
+            }
+
+            .navbar ul {
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 18px;
+            }
+
+            .logo h2 {
+                font-size: 20px;
+            }
+
+            .hero {
+                padding: 50px 25px;
+            }
+
+            .hero-content h1 {
+                font-size: 36px;
+            }
+
+            .hero-content p {
+                font-size: 16px;
+            }
+
+            .buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .primary-btn,
+            .secondary-btn {
+                width: 220px;
+                text-align: center;
+            }
+
+            .features,
+            .topics,
+            .steps,
+            .contact-section {
+                padding: 60px 25px;
+            }
+
+            .features h2,
+            .topics h2,
+            .steps h2 {
+                font-size: 32px;
+            }
+
+            .feature-card {
+                padding: 25px;
+            }
+
+            .topic-card {
+                padding: 20px;
+                font-size: 16px;
+            }
+
+            .step {
+                width: 100%;
+            }
+
+            .cta {
+                margin: 25px;
+                padding: 50px 20px;
+            }
+
+            .cta h2 {
+                font-size: 30px;
+            }
+
+            .contact-form {
+                padding: 25px;
+            }
+
+            .footer-content img {
+                width: 70px;
+            }
+        }
+
+        @media(max-width:480px) {
+            .hero-content h1 {
+                font-size: 30px;
+            }
+
+            .hero-content p {
+                font-size: 15px;
+            }
+
+            .logo img {
+                width: 42px;
+                height: 42px;
+            }
+
+            .logo h2 {
+                font-size: 18px;
+            }
+
+            .btn {
+                padding: 10px 22px;
+            }
+
+            .primary-btn,
+            .secondary-btn {
+                width: 200px;
+                padding: 13px;
+            }
+
+            .social-icons {
+                justify-content: center;
+            }
+
+            .info-box {
+                font-size: 15px;
+            }
+
+            .footer-content h2 {
+                font-size: 22px;
+            }
+        }
+
+
+        /* ==========================================================
+   CHATBOT PAGE STYLES (from chatbot.css)
+========================================================== */
+
+        #page-chatbot {
+            background: #eef2f7;
+            color: #1f2937;
+        }
+
+        #page-chatbot .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 75px;
+            padding: 0 60px;
+        }
+
+        #page-chatbot .logo img {
+            width: 60px;
+            height: 60px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            padding: 0;
+        }
+
+        #page-chatbot .chat-container {
+            width: 90%;
+            max-width: 1200px;
+            height: 82vh;
+            margin: 110px auto 30px;
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 35px rgba(0, 0, 0, .15);
+            flex: 1;
+        }
+
+        #page-chatbot .chat-header {
+            background: var(--primary);
+            color: white;
+            padding: 25px 35px;
+            border-bottom: 2px solid #1e88e5;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        #page-chatbot .chat-header h2 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+
+        #page-chatbot .chat-header p {
+            color: #dbe8ff;
+        }
+
+        .doc-status-banner {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, .12);
+            padding: 10px 16px;
+            border-radius: 30px;
+            font-size: 14px;
+            color: white;
+        }
+
+        .doc-status-banner i.fa-file-pdf {
+            color: #F4C542;
+            font-size: 16px;
+        }
+
+        .remove-doc-btn {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            opacity: .75;
+            transition: .2s;
+            display: flex;
+            align-items: center;
+        }
+
+        .remove-doc-btn:hover {
+            opacity: 1;
+            color: #F4C542;
+        }
+
+        #page-chatbot .chat-box {
+            flex: 1;
+            overflow-y: auto;
+            padding: 35px;
+            background: #f8fafc;
+        }
+
+        #page-chatbot .chat-box::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #page-chatbot .chat-box::-webkit-scrollbar-thumb {
+            background: #1E88E5;
+            border-radius: 10px;
+        }
+
+        #page-chatbot .chat-box::-webkit-scrollbar-track {
+            background: #dde7f5;
+        }
+
+        #page-chatbot .bot-message,
+        #page-chatbot .user-message {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+            animation: fadeIn .3s ease;
+        }
+
+        #page-chatbot .user-message {
+            justify-content: flex-end;
+        }
+
+        #page-chatbot .bot-icon,
+        #page-chatbot .user-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 22px;
+            flex-shrink: 0;
+        }
+
+        #page-chatbot .bot-icon {
+            background: #2563eb;
+            color: white;
+        }
+
+        #page-chatbot .user-icon {
+            background: var(--primary);
+            color: white;
+        }
+
+        #page-chatbot .message {
+            max-width: 75%;
+            background: white;
+            padding: 18px 22px;
+            border-radius: 18px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, .08);
+            line-height: 1.7;
+            color: #333;
+            transition: .3s;
+        }
+
+        #page-chatbot .message:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, .12);
+        }
+
+        #page-chatbot .user-message .message {
+            background: #2563eb;
+            color: white;
+        }
+
+        #page-chatbot .message p {
+            margin-bottom: 10px;
+        }
+
+        #page-chatbot .message p:last-child {
+            margin-bottom: 0;
+        }
+
+        #page-chatbot .citation {
+            margin-top: 18px;
+            background: #eef4ff;
+            border-left: 5px solid #2563eb;
+            padding: 12px 15px;
+            border-radius: 10px;
+            font-size: 14px;
+            color: var(--primary);
+            font-weight: 500;
+        }
+
+        #page-chatbot .speak-btn {
+            margin-top: 18px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all .3s ease;
+            font-size: 15px;
+        }
+
+        #page-chatbot .speak-btn:hover {
+            background: var(--primary);
+            transform: translateY(-2px);
+        }
+
+        #page-chatbot .typing {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            margin: 15px 0;
+            padding-left: 20px;
+        }
+
+        #page-chatbot .typing span {
+            width: 10px;
+            height: 10px;
+            background: #2563eb;
+            border-radius: 50%;
+            animation: typingDots 1s infinite;
+        }
+
+        #page-chatbot .typing span:nth-child(2) {
+            animation-delay: .2s;
+        }
+
+        #page-chatbot .typing span:nth-child(3) {
+            animation-delay: .4s;
+        }
+
+        @keyframes typingDots {
+            0% {
+                transform: translateY(0);
+                opacity: .4;
+            }
+
+            50% {
+                transform: translateY(-8px);
+                opacity: 1;
+            }
+
+            100% {
+                transform: translateY(0);
+                opacity: .4;
+            }
+        }
+
+        #page-chatbot .input-area {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #ddd;
+        }
+
+        #page-chatbot .input-area input {
+            flex: 1;
+            padding: 16px;
+            border-radius: 40px;
+            border: 1px solid #ccc;
+            outline: none;
+            font-size: 16px;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        #page-chatbot .input-area input:focus {
+            border-color: #2563eb;
+        }
+
+        #page-chatbot .input-area input::placeholder {
+            color: #9ca3af;
+        }
+
+        #page-chatbot .icon-btn {
+            width: 52px;
+            height: 52px;
+            border: none;
+            border-radius: 50%;
+            background: #f2f4f8;
+            cursor: pointer;
+            font-size: 20px;
+            transition: all .3s ease;
+        }
+
+        #page-chatbot .icon-btn:hover {
+            background: #2563eb;
+            color: white;
+            transform: scale(1.08);
+            box-shadow: 0 8px 20px rgba(37, 99, 235, .4);
+        }
+
+        #page-chatbot .icon-btn.listening {
+            background: #ef4444;
+            color: white;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, .6);
+            }
+
+            70% {
+                transform: scale(1.08);
+                box-shadow: 0 0 0 18px rgba(239, 68, 68, 0);
+            }
+
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+            }
+        }
+
+        #page-chatbot .send-btn {
+            width: 55px;
+            height: 55px;
+            border: none;
+            border-radius: 50%;
+            background: #2563eb;
+            color: white;
+            cursor: pointer;
+            font-size: 20px;
+            transition: all .3s ease;
+        }
+
+        #page-chatbot .send-btn:hover {
+            background: var(--primary);
+            transform: scale(1.08);
+            box-shadow: 0 8px 20px rgba(37, 99, 235, .4);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        #page-chatbot footer {
+            width: 100%;
+            background: var(--primary);
+            color: white;
+            text-align: center;
+            padding: 15px;
+            font-size: 15px;
+            margin-top: auto;
+        }
+
+        @media(max-width:992px) {
+            #page-chatbot .navbar {
+                padding: 0 30px;
+            }
+
+            #page-chatbot .logo h2 {
+                font-size: 20px;
+            }
+
+            #page-chatbot .chat-container {
+                width: 96%;
+                height: 84vh;
+            }
+
+            #page-chatbot .chat-header h2 {
+                font-size: 24px;
+            }
+
+            #page-chatbot .message {
+                max-width: 85%;
+            }
+        }
+
+        @media(max-width:768px) {
+            #page-chatbot {
+                overflow: auto;
+            }
+
+            #page-chatbot .navbar {
+                flex-direction: column;
+                height: auto;
+                padding: 15px;
+                gap: 15px;
+                position: sticky;
+            }
+
+            #page-chatbot .navbar ul {
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 15px;
+            }
+
+            #page-chatbot .logo img {
+                width: 40px;
+                height: 40px;
+            }
+
+            #page-chatbot .logo h2 {
+                font-size: 18px;
+            }
+
+            #page-chatbot .chat-container {
+                width: 100%;
+                height: calc(100vh - 120px);
+                margin-top: 20px;
+                border-radius: 0;
+            }
+
+            #page-chatbot .chat-header {
+                padding: 18px;
+            }
+
+            #page-chatbot .chat-header h2 {
+                font-size: 22px;
+            }
+
+            #page-chatbot .chat-box {
+                padding: 20px;
+            }
+
+            #page-chatbot .message {
+                max-width: 100%;
+                font-size: 15px;
+            }
+
+            #page-chatbot .input-area {
+                padding: 15px;
+                gap: 10px;
+            }
+
+            #page-chatbot .input-area input {
+                font-size: 15px;
+                padding: 14px;
+            }
+
+            #page-chatbot .send-btn,
+            #page-chatbot .icon-btn {
+                width: 48px;
+                height: 48px;
+                font-size: 18px;
+            }
+        }
+
+        @media(max-width:480px) {
+            #page-chatbot .chat-header h2 {
+                font-size: 20px;
+            }
+
+            #page-chatbot .chat-header p {
+                font-size: 14px;
+            }
+
+            #page-chatbot .message {
+                font-size: 14px;
+                padding: 15px;
+            }
+
+            #page-chatbot .bot-icon,
+            #page-chatbot .user-icon {
+                width: 42px;
+                height: 42px;
+                font-size: 18px;
+            }
+
+            #page-chatbot .input-area {
+                flex-wrap: wrap;
+            }
+
+            #page-chatbot .input-area input {
+                width: 100%;
+                order: 1;
+            }
+
+            #page-chatbot .icon-btn {
+                order: 2;
+            }
+
+            #page-chatbot .send-btn {
+                order: 3;
+            }
+
+            #page-chatbot footer {
+                font-size: 13px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ============================================================
+     PAGE: HOME
+============================================================ -->
+    <div id="page-home" class="page active">
+
+        <nav class="navbar">
+            <div class="logo">
+                <img src="/static/images/logo.png" alt="Logo">
+                <h2>Legal Knowledge Twin</h2>
+            </div>
+            <ul class="nav-links">
+                <li><a class="nav-link active" data-page="home">Home</a></li>
+                <li><a class="nav-link" data-page="about">About</a></li>
+                <li><a class="nav-link" data-page="contact">Contact</a></li>
+            </ul>
+            <a class="btn nav-link" data-page="chatbot">Get Started</a>
+        </nav>
+
+        <section class="hero">
+            <div class="hero-content">
+                <h1>AI Powered Legal Assistance</h1>
+                <p>
+                    Legal Knowledge Twin helps citizens, students and professionals
+                    understand Indian laws through an AI-powered conversational
+                    assistant using Retrieval-Augmented Generation (RAG).
+                </p>
+                <div class="buttons">
+                    <a class="primary-btn nav-link" data-page="chatbot">Get Started</a>
+                    <a class="secondary-btn" href="#features-section">Learn More</a>
+                </div>
+            </div>
+            <div class="hero-image">
+                <img src="/static/images/laww.png" alt="AI Assistant">
+            </div>
+        </section>
+
+        <section id="features-section" class="features">
+            <h2>Why Choose Legal Knowledge Twin?</h2>
+            <p class="subtitle">Intelligent legal guidance powered by AI and verified legal documents.</p>
+            <div class="feature-container">
+                <div class="feature-card">
+                    <i class="fas fa-book-open"></i>
+                    <h3>Verified Legal Documents</h3>
+                    <p>Answers generated only from trusted legal documents and government Acts.</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-robot"></i>
+                    <h3>AI Powered Responses</h3>
+                    <p>Uses Retrieval-Augmented Generation to provide accurate legal explanations.</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-microphone"></i>
+                    <h3>Voice Assistant</h3>
+                    <p>Ask questions using voice with speech recognition.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="topics">
+            <h2>Legal Knowledge Available</h2>
+            <div class="topic-grid">
+                <div class="topic-card">Indian Constitution</div>
+                <div class="topic-card">Bharatiya Nyaya Sanhita</div>
+                <div class="topic-card">Bharatiya Nagarik Suraksha Sanhita</div>
+                <div class="topic-card">Consumer Protection Act</div>
+                <div class="topic-card">Cyber Crime Laws</div>
+                <div class="topic-card">Government Guidelines</div>
+                <div class="topic-card">Labour Laws</div>
+                <div class="topic-card">RTI Act 2005</div>
+                <div class="topic-card">Women Protection Laws</div>
+                <div class="topic-card">Judgements</div>
+            </div>
+        </section>
+
+        <section class="steps">
+            <h2>How It Works</h2>
+            <div class="step-box">
+                <div class="step"><span>1</span>
+                    <h3>Select Topic</h3>
+                </div>
+                <div class="step"><span>2</span>
+                    <h3>Ask Your Question</h3>
+                </div>
+                <div class="step"><span>3</span>
+                    <h3>AI Searches PDFs</h3>
+                </div>
+                <div class="step"><span>4</span>
+                    <h3>Receive Accurate Answer</h3>
+                </div>
+            </div>
+        </section>
+
+        <section class="cta">
+            <div class="cta-content">
+                <h2>Ready to Explore Indian Laws?</h2>
+                <p>Start chatting with our Legal AI Assistant today.</p>
+                <a class="primary-btn nav-link" data-page="chatbot">Launch Assistant</a>
+            </div>
+        </section>
+
+        <footer>
+            <div class="footer-content">
+                <img src="/static/images/justice.png" alt="Justice">
+                <h2>Legal Knowledge Twin</h2>
+                <p>AI Powered Legal Assistance using Retrieval-Augmented Generation.</p>
+                <div class="social-icons">
+                    <i class="fab fa-github"></i>
+                    <i class="fab fa-linkedin"></i>
+                    <i class="fab fa-instagram"></i>
+                </div>
+                <p class="copyright">© 2026 Legal Knowledge Twin | All Rights Reserved</p>
+            </div>
+        </footer>
+    </div>
+
+
+    <!-- ============================================================
+     PAGE: ABOUT
+============================================================ -->
+    <div id="page-about" class="page">
+
+        <nav class="navbar">
+            <div class="logo">
+                <img src="/static/images/logo.png" alt="Logo">
+                <h2>Legal Knowledge Twin</h2>
+            </div>
+            <ul>
+                <li><a class="nav-link" data-page="home">Home</a></li>
+                <li><a class="nav-link" data-page="about">About</a></li>
+                <li><a class="nav-link" data-page="contact">Contact</a></li>
+            </ul>
+            <a class="btn nav-link" data-page="chatbot">Get Started</a>
+        </nav>
+
+        <section class="hero about-hero">
+            <div class="hero-content">
+                <h1>About Legal Knowledge Twin</h1>
+                <p>
+                    An AI-powered conversational legal assistant designed to simplify
+                    Indian legal knowledge through Retrieval-Augmented Generation (RAG).
+                </p>
+            </div>
+            <div class="hero-image">
+                <img src="/static/images/justice.png" alt="AI Assistant">
+            </div>
+        </section>
+
+        <section class="features">
+            <h2>Our Mission</h2>
+            <div class="feature-container">
+                <div class="feature-card">
+                    <i class="fas fa-scale-balanced"></i>
+                    <h3>Accessible Legal Knowledge</h3>
+                    <p>Our goal is to make Indian legal information simple, understandable, and accessible to every
+                        citizen.</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-robot"></i>
+                    <h3>AI Powered Assistance</h3>
+                    <p>Using Retrieval-Augmented Generation (RAG), the system retrieves relevant legal information
+                        before generating accurate responses.</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-book"></i>
+                    <h3>Trusted Sources</h3>
+                    <p>Information is retrieved from verified legal documents, statutes, judgments, and government
+                        guidelines.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="steps">
+            <h2>How Our AI Works</h2>
+            <div class="step-box">
+                <div class="step"><span>1</span>
+                    <h3>Select Legal Topic</h3>
+                </div>
+                <div class="step"><span>2</span>
+                    <h3>Ask Your Question</h3>
+                </div>
+                <div class="step"><span>3</span>
+                    <h3>Search Legal PDFs</h3>
+                </div>
+                <div class="step"><span>4</span>
+                    <h3>Receive Accurate Answer</h3>
+                </div>
+            </div>
+        </section>
+
+
+
+        <section class="features">
+            <h2>Why Choose Us?</h2>
+            <div class="feature-container">
+                <div class="feature-card">
+                    <i class="fas fa-check-circle"></i>
+                    <h3>Reliable Information</h3>
+                    <p>AI responses are based on uploaded legal documents rather than generic internet information.</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-microphone"></i>
+                    <h3>Voice Support</h3>
+                    <p>Users can interact using voice for a faster and more accessible experience.</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-comments"></i>
+                    <h3>Conversational Interface</h3>
+                    <p>Ask questions naturally just like chatting with an expert.</p>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            <div class="footer-content">
+                <img src="/static/images/justice.png" alt="Justice">
+                <h2>Legal Knowledge Twin</h2>
+                <p>AI Powered Conversational Legal Assistance</p>
+                <div class="social-icons">
+                    <i class="fab fa-github"></i>
+                    <i class="fab fa-linkedin"></i>
+                    <i class="fab fa-instagram"></i>
+                </div>
+                <p>© 2026 Legal Knowledge Twin | All Rights Reserved</p>
+            </div>
+        </footer>
+    </div>
+
+
+    <!-- ============================================================
+     PAGE: CONTACT
+============================================================ -->
+    <div id="page-contact" class="page">
+
+        <nav class="navbar">
+            <div class="logo">
+                <img src="/static/images/logo.png" alt="Logo">
+                <h2>Legal Knowledge Twin</h2>
+            </div>
+            <ul>
+                <li><a class="nav-link" data-page="home">Home</a></li>
+                <li><a class="nav-link" data-page="about">About</a></li>
+                <li><a class="nav-link" data-page="contact">Contact</a></li>
+            </ul>
+            <a class="btn nav-link" data-page="chatbot">Get Started</a>
+        </nav>
+
+        <section class="hero">
+            <div class="hero-content">
+                <h1>Contact Us</h1>
+                <p>We'd love to hear your feedback, ideas, or questions about Legal Knowledge Twin.</p>
+            </div>
+            <div class="hero-image">
+                <img src="/static/images/laww.png" alt="law">
+            </div>
+        </section>
+
+        <section class="contact-section">
+            <div class="contact-container">
+                <div class="contact-info">
+                    <h2>Get in Touch</h2>
+                    <p>Have a question or suggestion? Reach out to us and we'll be happy to help.</p>
+                    <div class="info-box">
+                        <i class="fas fa-envelope"></i>
+                        <span>legaltwin@example.com</span>
+                    </div>
+                    <div class="info-box">
+                        <i class="fas fa-phone"></i>
+                        <span>+91 98765 43210</span>
+                    </div>
+                    <div class="info-box">
+                        <i class="fas fa-location-dot"></i>
+                        <span>Visakhapatnam, Andhra Pradesh, India</span>
+                    </div>
+                    <div class="social-icons">
+                        <i class="fab fa-github"></i>
+                        <i class="fab fa-linkedin"></i>
+                        <i class="fab fa-instagram"></i>
+                    </div>
+                </div>
+
+                <div class="contact-form">
+                    <form onsubmit="return false;">
+                        <input type="text" placeholder="Your Name" required>
+                        <input type="email" placeholder="Your Email" required>
+                        <input type="text" placeholder="Subject">
+                        <textarea rows="6" placeholder="Write your message..." required></textarea>
+                        <button type="submit">
+                            <i class="fas fa-paper-plane"></i>
+                            Send Message
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <section class="features">
+            <h2>Frequently Asked Questions</h2>
+            <div class="feature-container">
+                <div class="feature-card">
+                    <i class="fas fa-circle-question"></i>
+                    <h3>Is this legal advice?</h3>
+                    <p>No. Legal Knowledge Twin provides AI-assisted information based on legal documents. It is not a
+                        substitute for professional legal advice.</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-file-pdf"></i>
+                    <h3>Where do the answers come from?</h3>
+                    <p>Answers are retrieved from the legal PDF documents available in the system using
+                        Retrieval-Augmented Generation (RAG).</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-microphone"></i>
+                    <h3>Can I use voice input?</h3>
+                    <p>Yes. The chatbot supports voice input using the built-in microphone feature.</p>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            <div class="footer-content">
+                <img src="/static/images/justice.png" alt="Justice">
+                <h2>Legal Knowledge Twin</h2>
+                <p>AI Powered Legal Assistance</p>
+                <div class="social-icons">
+                    <i class="fab fa-github"></i>
+                    <i class="fab fa-linkedin"></i>
+                    <i class="fab fa-instagram"></i>
+                </div>
+                <p>© 2026 Legal Knowledge Twin | All Rights Reserved</p>
+            </div>
+        </footer>
+    </div>
+
+
+    <!-- ============================================================
+     PAGE: CHATBOT
+============================================================ -->
+    <div id="page-chatbot" class="page">
+
+        <nav class="navbar">
+            <div class="logo">
+                <img src="/static/images/logo.png" alt="Logo">
+                <h2>Legal Knowledge Twin</h2>
+            </div>
+            <ul>
+                <li><a class="nav-link" data-page="home">Home</a></li>
+                <li><a class="nav-link" data-page="about">About</a></li>
+                <li><a class="nav-link" data-page="contact">Contact</a></li>
+            </ul>
+        </nav>
+
+        <div class="chat-container">
+            <div class="chat-header">
+                <div>
+                    <h2 id="topicName">Legal Assistant</h2>
+                    <p id="topicSubtitle">Ask anything related to the selected legal topic.</p>
+                </div>
+                <div id="docStatusBanner" class="doc-status-banner" style="display:none;">
+                    <i class="fas fa-file-pdf"></i>
+                    <span id="docStatusText"></span>
+                    <button id="removeDocBtn" class="remove-doc-btn"
+                        title="Remove document and return to general knowledge base">
+                        <i class="fas fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div id="chatBox" class="chat-box">
+                <div class="bot-message">
+                    <div class="bot-icon"><i class="fas fa-scale-balanced"></i></div>
+                    <div class="message">
+                        <p>👋 Welcome!</p>
+                        <p>I am your Legal Knowledge Twin.</p>
+                        <p>Ask me anything related to the selected legal document.</p>
+                        <p>You can also upload your own legal PDF using the paperclip icon, or use the microphone to ask
+                            by voice.</p>
+                        <div class="citation">Source : Selected Legal PDF</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="typing" class="typing">
+                <span></span><span></span><span></span>
+            </div>
+
+            <div class="input-area">
+                <input type="file" id="fileInput" accept="application/pdf" style="display:none;">
+                <button id="uploadBtn" class="icon-btn" title="Upload a legal PDF to ask questions about it">
+                    <i class="fas fa-paperclip"></i>
+                </button>
+                <button id="voiceBtn" class="icon-btn" title="Ask by voice">
+                    <i class="fas fa-microphone"></i>
+                </button>
+                <input type="text" id="question" placeholder="Ask your legal question here...">
+                <button id="sendBtn" class="send-btn">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+
+        <footer>
+            <p>© 2026 Legal Knowledge Twin | AI Powered Legal Assistance</p>
+        </footer>
+    </div>
+
+
+    <!-- ============================================================
+     JAVASCRIPT
+============================================================ -->
+    <script>
+        /* ==========================================================
+           PAGE ROUTER
+        ========================================================== */
+        function showPage(pageName) {
+
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+
+            const target = document.getElementById('page-' + pageName);
+            if (target) {
+                target.classList.add('active');
+            }
+
+            document.querySelectorAll('.nav-link').forEach(link => {
+                if (link.dataset.page === pageName) {
+                    link.classList.add('active');
+                } else {
+                    link.classList.remove('active');
+                }
+            });
+
+            window.scrollTo({ top: 0, behavior: 'instant' });
+        }
+
+        document.querySelectorAll('.nav-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                showPage(link.dataset.page);
+            });
+        });
+
+        showPage('home');
+    </script>
+
+    <script>
+        // =========================================
+        // LEGAL KNOWLEDGE TWIN — script.js
+        // =========================================
+
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener("click", function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute("href"));
+                if (target) {
+                    target.scrollIntoView({ behavior: "smooth" });
+                }
+            });
+        });
+
+        window.addEventListener("scroll", () => {
+            document.querySelectorAll(".navbar").forEach(navbar => {
+                if (window.scrollY > 50) {
+                    navbar.style.boxShadow = "0 8px 25px rgba(0,0,0,0.18)";
+                } else {
+                    navbar.style.boxShadow = "none";
+                }
+            });
+        });
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = "1";
+                    entry.target.style.transform = "translateY(0)";
+                }
+            });
+        }, { threshold: 0.2 });
+
+        document.querySelectorAll("#page-home section, #page-about section, #page-contact section").forEach(section => {
+            section.style.opacity = "0";
+            section.style.transform = "translateY(40px)";
+            section.style.transition = "0.8s";
+            observer.observe(section);
+        });
+
+        const buttons = document.querySelectorAll(".primary-btn,.secondary-btn,.btn");
+        buttons.forEach(button => {
+            button.addEventListener("mouseenter", () => { button.style.transform = "translateY(-4px)"; });
+            button.addEventListener("mouseleave", () => { button.style.transform = "translateY(0px)"; });
+        });
+
+        console.log("Legal Knowledge Twin Loaded Successfully.");
+    </script>
+
+    <script>
+        // =========================================
+        // Legal Knowledge Twin — chatbot.js
+        // (upload + chat + voice input)
+        // =========================================
+
+        const API_URL = "/chat";
+        const UPLOAD_URL = "/upload";
+        const REMOVE_DOC_URL = "/remove-document";
+
+        const chatBox = document.getElementById("chatBox");
+        const questionInput = document.getElementById("question");
+        const sendBtn = document.getElementById("sendBtn");
+        const typing = document.getElementById("typing");
+
+        const uploadBtn = document.getElementById("uploadBtn");
+        const fileInput = document.getElementById("fileInput");
+        const docStatusBanner = document.getElementById("docStatusBanner");
+        const docStatusText = document.getElementById("docStatusText");
+        const removeDocBtn = document.getElementById("removeDocBtn");
+        const topicSubtitle = document.getElementById("topicSubtitle");
+        const voiceBtn = document.getElementById("voiceBtn");
+
+        let currentSessionId = null;
+        let currentDocFilename = null;
+
+        questionInput.addEventListener("keydown", function (event) {
+            if (event.key === "Enter") {
+                sendQuestion();
+            }
+        });
+
+        sendBtn.addEventListener("click", sendQuestion);
+
+        // ----------------------------------
+        // Upload button opens file picker
+        // ----------------------------------
+        uploadBtn.addEventListener("click", () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener("change", async () => {
+
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            if (!file.name.toLowerCase().endsWith(".pdf")) {
+                addBotMessage("Only PDF files are supported. Please choose a .pdf file.", "Error");
+                fileInput.value = "";
+                return;
+            }
+
+            addUserMessage(`📎 Uploading: ${file.name}`);
+            typing.style.display = "flex";
+
+            const formData = new FormData();
+            formData.append("file", file);
+
+            try {
+                const response = await fetch(UPLOAD_URL, {
+                    method: "POST",
+                    body: formData
+                });
+
+                const data = await response.json();
+                typing.style.display = "none";
+
+                if (data.status === "error") {
+                    addBotMessage(data.message || "Could not process this document.", "Upload Error");
+                    fileInput.value = "";
+                    return;
+                }
+
+                currentSessionId = data.session_id;
+                currentDocFilename = data.filename;
+
+                showDocStatus(data.filename);
+
+                addBotMessage(
+                    `Your document "${data.filename}" has been uploaded and indexed (${data.chunks_indexed} sections). Ask me anything about it, and I'll answer using only this document.`,
+                    data.filename
+                );
+            }
+            catch (error) {
+                typing.style.display = "none";
+                addBotMessage("Unable to upload the document. Please try again.", "Connection Error");
+                console.error(error);
+            }
+            finally {
+                fileInput.value = "";
+            }
+        });
+
+        removeDocBtn.addEventListener("click", async () => {
+
+            if (!currentSessionId) return;
+
+            try {
+                await fetch(REMOVE_DOC_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: currentSessionId })
+                });
+            } catch (error) {
+                console.error(error);
+            }
+
+            const removedFilename = currentDocFilename;
+            currentSessionId = null;
+            currentDocFilename = null;
+            hideDocStatus();
+
+            addBotMessage(
+                `Removed "${removedFilename}". I'll now answer from the general legal knowledge base again.`,
+                "System"
+            );
+        });
+
+        function showDocStatus(filename) {
+            docStatusText.textContent = `Asking questions about: ${filename}`;
+            docStatusBanner.style.display = "flex";
+            topicSubtitle.textContent = "Answering from your uploaded document.";
+        }
+
+        function hideDocStatus() {
+            docStatusBanner.style.display = "none";
+            topicSubtitle.textContent = "Ask anything related to the selected legal topic.";
+        }
+
+        // ----------------------------------
+        // Voice input (server-side transcription)
+        // Records audio in the browser via MediaRecorder,
+        // sends it to /transcribe, and fills the question box
+        // with the returned text.
+        // ----------------------------------
+
+        let mediaRecorder = null;
+        let recordedChunks = [];
+
+        async function startRecording() {
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                mediaRecorder = new MediaRecorder(stream);
+                recordedChunks = [];
+
+                mediaRecorder.addEventListener("dataavailable", (event) => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                });
+
+                mediaRecorder.addEventListener("stop", async () => {
+
+                    stream.getTracks().forEach(track => track.stop());
+
+                    const audioBlob = new Blob(recordedChunks, { type: "audio/webm" });
+
+                    typing.style.display = "flex";
+
+                    const formData = new FormData();
+                    formData.append("audio", audioBlob, "recording.webm");
+
+                    try {
+                        const response = await fetch("/transcribe", {
+                            method: "POST",
+                            body: formData
+                        });
+
+                        const data = await response.json();
+                        typing.style.display = "none";
+
+                        if (data.status === "error") {
+                            addBotMessage(data.message || "Could not transcribe audio.", "Voice Error");
+                            return;
+                        }
+
+                        questionInput.value = data.transcript;
+                        sendQuestion();
+                    }
+                    catch (error) {
+                        typing.style.display = "none";
+                        addBotMessage("Unable to reach the transcription service.", "Connection Error");
+                        console.error(error);
+                    }
+                });
+
+                mediaRecorder.start();
+                voiceBtn.classList.add("listening");
+            }
+            catch (error) {
+                addBotMessage("Microphone access was denied or is unavailable in this browser.", "System");
+                console.error(error);
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop();
+            }
+            voiceBtn.classList.remove("listening");
+        }
+
+        if (navigator.mediaDevices && window.MediaRecorder) {
+            voiceBtn.addEventListener("click", () => {
+                if (voiceBtn.classList.contains("listening")) {
+                    stopRecording();
+                } else {
+                    startRecording();
+                }
+            });
+        } else {
+            voiceBtn.addEventListener("click", () => {
+                addBotMessage("Voice input is not supported in this browser.", "System");
+            });
+        }
+
+        async function sendQuestion() {
+
+            const question = questionInput.value.trim();
+            if (question === "") return;
+
+            addUserMessage(question);
+            questionInput.value = "";
+            typing.style.display = "flex";
+
+            try {
+                const requestBody = { question: question };
+
+                if (currentSessionId) {
+                    requestBody.session_id = currentSessionId;
+                }
+
+                const response = await fetch(API_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const data = await response.json();
+                typing.style.display = "none";
+
+                if (data.status === "error") {
+                    addBotMessage(
+                        data.message || "Something went wrong.",
+                        "Error"
+                    );
+                    return;
+                }
+
+                const sourceText = (data.sources && data.sources.length > 0)
+                    ? data.sources.join(", ")
+                    : (data.source_mode === "uploaded_document" ? currentDocFilename : "Legal Knowledge Twin Database");
+
+                addBotMessage(
+                    data.answer || "No answer received.",
+                    sourceText
+                );
+            }
+            catch (error) {
+                typing.style.display = "none";
+                addBotMessage("Unable to connect to the backend server.", "Connection Error");
+                console.error(error);
+            }
+        }
+
+        function addUserMessage(text) {
+            const div = document.createElement("div");
+            div.className = "user-message";
+            div.innerHTML = `
+        <div class="message"><p>${escapeHtml(text)}</p></div>
+        <div class="user-icon"><i class="fas fa-user"></i></div>
+    `;
+            chatBox.appendChild(div);
+            scrollBottom();
+        }
+
+        function addBotMessage(answer, source) {
+            const div = document.createElement("div");
+            div.className = "bot-message";
+
+            const formattedAnswer = escapeHtml(answer).replace(/\n/g, "<br>");
+
+            div.innerHTML = `
+        <div class="bot-icon"><i class="fas fa-scale-balanced"></i></div>
+        <div class="message">
+            <p>${formattedAnswer}</p>
+            <div class="citation"><strong>Source:</strong> ${escapeHtml(source)}</div>
+        </div>
+    `;
+            chatBox.appendChild(div);
+            scrollBottom();
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement("div");
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function scrollBottom() {
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    </script>
+
+</body>
+
+</html>
