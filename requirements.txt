@@ -1,0 +1,29 @@
+Flask==3.1.1
+Flask-Cors==6.0.1
+gunicorn==23.0.0
+
+langchain==0.3.27
+langchain-core==0.3.72
+langchain-community==0.3.27
+langchain-qdrant==0.2.0
+langchain-huggingface==0.3.1
+langchain-groq==0.3.7
+langchain-text-splitters==0.3.9
+
+qdrant-client==1.15.1
+
+sentence-transformers==3.0.1
+transformers==4.44.2
+torch
+
+python-dotenv==1.1.1
+pypdf==5.9.0
+requests==2.32.4
+
+# --- Added: these are imported in app.py but were missing above ---
+# Pinned to <1.0 because app.py uses the old `mistralai.client.MistralClient`
+# import style. mistralai 1.0+ rewrote the SDK to `from mistralai import Mistral`,
+# which would break your existing code if left unpinned.
+mistralai==0.4.2
+SpeechRecognition==3.10.4
+pydub==0.25.1
