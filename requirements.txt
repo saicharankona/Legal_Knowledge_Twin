@@ -1,3 +1,4 @@
+PYTHON_VERSION=3.11.9
 Flask==3.1.1
 Flask-Cors==6.0.1
 gunicorn==23.0.0
@@ -14,7 +15,8 @@ qdrant-client==1.15.1
 
 sentence-transformers==3.0.1
 transformers==4.44.2
-torch
+#--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.1+cpu
 
 python-dotenv==1.1.1
 pypdf==5.9.0
