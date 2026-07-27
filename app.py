@@ -64,7 +64,7 @@ MIN_RELEVANCE_SCORE = float(os.getenv('MIN_RELEVANCE_SCORE', '0.0'))
 
 # The exact sentence returned whenever the documents don't contain the answer.
 # Kept as a constant so it's used identically everywhere (prompt, fallback checks).
-NOT_FOUND_MESSAGE = "The provided legal documents do not contain information about this specific question."
+NOT_FOUND_MESSAGE = "Sorry! The provided legal documents do not contain information about this specific question."
 
 active_upload_sessions = {}
 
@@ -171,26 +171,27 @@ def ask_llm(prompt: str) -> str:
     # (word-for-word) whenever the supplied context doesn't clearly answer the question.
     system_prompt = f"""You are a document-grounded legal assistant for Indian law.
 
-STRICT RULES (do not break these under any circumstance):
-1. Answer using ONLY the information contained in the LEGAL CONTEXT provided in the user message.
-2. Do NOT use any legal knowledge you have from training. Even if you recognize the topic
-   and know the general legal position, you must ignore that knowledge and rely only on
-   the supplied context.
-3. Do NOT infer, extrapolate, or fill gaps with assumptions beyond what the context states.
-4. If the LEGAL CONTEXT does not clearly and directly answer the question, you MUST respond
-   with exactly this sentence and nothing else:
+RULES:
+1. Answer using the information contained in the LEGAL CONTEXT provided in the user message.
+   The context may use different wording than the question — read it carefully and use any
+   information that is relevant, even if phrased differently or spread across the context.
+2. Do NOT add legal knowledge from your own training that is not present in the context —
+   don't introduce sections, acts, or facts that aren't stated in the supplied context.
+3. Only respond with the exact fallback sentence below if the context truly does not address
+   the topic of the question at all. If the context is on-topic but only partially answers
+   the question, answer with what the context does cover — do not refuse just because the
+   context isn't a perfect or complete match.
+4. Fallback sentence (use word-for-word, only when the context is genuinely unrelated to the question):
    "{NOT_FOUND_MESSAGE}"
-5. Never mix in outside examples, sections, or acts that are not explicitly present in the
-   supplied context, even if they seem relevant.
 
-When the context IS sufficient, provide responses in official, formal language.
+When the context is relevant, provide responses in official, formal language.
 Do not use markdown, emojis, or special symbols.
 Structure your response with these sections:
-SUMMARY: Brief overview of the legal position, using only facts drawn from the context
-DETAILED EXPLANATION: Comprehensive explanation using only the supplied context
-LEGAL PROVISIONS: Only sections/provisions that literally appear in the context
+SUMMARY: Brief overview of the legal position, based on the context
+DETAILED EXPLANATION: Comprehensive explanation using the supplied context
+LEGAL PROVISIONS: Sections/provisions that appear in the context
 SOURCES: List of documents referenced (from the context)
-PRACTICAL GUIDANCE: Actionable next steps for the user, based only on the context"""
+PRACTICAL GUIDANCE: Actionable next steps for the user, based on the context"""
 
     for model in chat_models:
         try:
@@ -364,16 +365,16 @@ def chat():
         # Build prompt — reiterate the strict grounding rule at the point of use,
         # not just in the system message, since some models weight the most
         # recent instruction more heavily.
-        prompt = f"""LEGAL CONTEXT (this is the ONLY information you may use):
+        prompt = f"""LEGAL CONTEXT (use this to answer the question below):
 {context}
 
 USER QUESTION:
 {question}
 
-Answer using ONLY the LEGAL CONTEXT above. Do not use any outside knowledge of Indian
-law, even if you are confident about it — if it is not explicitly stated above, treat it
-as unknown. If the context above does not clearly and directly answer the question,
-respond with exactly:
+Answer using the LEGAL CONTEXT above. The context may not use the exact same words as the
+question — read carefully and use anything relevant, even if phrased differently. Do not add
+outside legal knowledge that isn't stated above. Only respond with the exact fallback sentence
+below if the context is genuinely unrelated to what's being asked:
 "{NOT_FOUND_MESSAGE}"
 
 Otherwise, use this format (formal language, no symbols):
@@ -400,19 +401,16 @@ RESPONSE:"""
         # Get answer from LLM
         answer = ask_llm(prompt)
 
-        # Safety net: only steps in for the extreme case of essentially zero shared
-        # vocabulary between answer and context (a strong signal of pure recitation
-        # from training data rather than the documents). Loosened to a ratio-based
-        # check with a minimum context size, so short chunks and normal paraphrasing
-        # don't get falsely overridden to the fallback message.
+        # Log vocabulary overlap for diagnostics only — NOT used to override the
+        # answer. Literal word-matching is too blunt for legal text (e.g. "tenant"
+        # vs "tenants", or the model paraphrasing), and was overriding correct
+        # answers to the fallback message. The grounding rule now lives entirely
+        # in the prompt (see ask_llm's system prompt and the prompt below).
         context_words = set(re.findall(r'[a-z]{5,}', context.lower()))
         answer_words = set(re.findall(r'[a-z]{5,}', answer.lower()))
         overlap = len(context_words & answer_words)
         overlap_ratio = overlap / len(context_words) if context_words else 1
         logger.info(f"Context/answer overlap: {overlap} words ({overlap_ratio:.1%} of context vocab)")
-        if NOT_FOUND_MESSAGE not in answer and len(context_words) >= 15 and overlap_ratio < 0.03:
-            logger.warning("Answer had near-zero overlap with retrieved context; using fallback")
-            answer = NOT_FOUND_MESSAGE
 
         # Format as official response
         formatted_answer = format_official_response(answer, sources)
