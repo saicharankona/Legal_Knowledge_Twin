@@ -1,755 +1,494 @@
-
-
 import os
 import io
-import sys
 import uuid
-import tempfile
+import logging
+from typing import List
+from datetime import datetime
+from pathlib import Path
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_cors import CORS
-
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_qdrant import QdrantVectorStore
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
-
+from dotenv import load_dotenv
+import google.generativeai as genai
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
-
+import requests
 from pypdf import PdfReader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+import time
+import re
 
-from mistralai.client import MistralClient
-from mistralai.models.chat_completion import ChatMessage
+load_dotenv()
 
-import speech_recognition as sr
-from pydub import AudioSegment
-from pydub.effects import normalize as pydub_normalize
-
-
-# -------------------------------------------------------
-# Flask App
-# -------------------------------------------------------
-
-app = Flask(
-    __name__,
-    template_folder="templates",
-    static_folder="static"
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger(__name__)
 
-# ALLOWED_ORIGINS lets you lock CORS down to your real frontend domain
-# in production by setting it as a Render env var, e.g.
-# ALLOWED_ORIGINS=https://legal-twin.onrender.com
-# If it's not set, CORS stays open ("*") so nothing breaks by default.
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*")
-CORS(app, origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS != "*" else "*")
+app = Flask(__name__, template_folder='templates', static_folder='static')
+CORS(app)
 
+# Environment variables
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
+QDRANT_URL = os.getenv('QDRANT_URL')
+QDRANT_API_KEY = os.getenv('QDRANT_API_KEY')
 
-# -------------------------------------------------------
-# Environment Variables
-# -------------------------------------------------------
-# These must be set as Environment Variables in the Render dashboard
-# (Settings -> Environment), not in userdata/Colab secrets, and not
-# hardcoded here. Render injects them into os.environ at container
-# start, before this module is imported by gunicorn.
+# Validate environment variables
+required_vars = ['GEMINI_API_KEY', 'OPENROUTER_API_KEY', 'QDRANT_URL', 'QDRANT_API_KEY']
+missing_vars = [var for var in required_vars if not os.getenv(var)]
+if missing_vars:
+    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+# Initialize Gemini
+genai.configure(api_key=GEMINI_API_KEY)
+gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
 
-COLLECTION_NAME = "legal_knowledge"
+# Initialize Qdrant
+qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
-# Uploaded PDFs get their own collection so they never mix into the
-# main legal_knowledge results for other users' default (no-document)
-# questions. Every chunk stored here carries a "session_id" in its
-# metadata, and every read/delete against this collection is filtered
-# by that session_id, so one browser tab only ever sees its own upload.
-UPLOADS_COLLECTION_NAME = "user_uploaded_documents"
+# Constants
+COLLECTION_NAME = "legal_knowledge_v2"
+UPLOADS_COLLECTION = "user_uploaded_v2"
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 50
+MAX_UPLOAD_SIZE_BYTES = 15 * 1024 * 1024
 
-MISTRAL_MODEL = "mistral-large-latest"
-
-
-# -------------------------------------------------------
-# Validate Environment Variables
-# -------------------------------------------------------
-# Fail fast and loud on missing config, with a message that points
-# straight at the fix (Render dashboard -> Environment), instead of
-# a bare Exception that just says a name is missing.
-
-_missing_env_vars = [
-    name for name, value in [
-        ("QDRANT_URL", QDRANT_URL),
-        ("QDRANT_API_KEY", QDRANT_API_KEY),
-        ("MISTRAL_API_KEY", MISTRAL_API_KEY),
-    ] if not value
-]
-
-if _missing_env_vars:
-    print(
-        "STARTUP FAILED - missing required environment variable(s): "
-        + ", ".join(_missing_env_vars)
-    )
-    print(
-        "Fix: Render dashboard -> your service -> Environment tab -> "
-        "add each key above with its real value, then redeploy."
-    )
-    sys.exit(1)
-
-
-# -------------------------------------------------------
-# Load Embedding Model
-# -------------------------------------------------------
-# NOTE: this downloads/loads the all-MiniLM-L6-v2 weights at process
-# start, before gunicorn opens the port. On a cold instance this can
-# take a noticeable amount of time and Render's "No open ports
-# detected, continuing to scan..." log line is expected while it's
-# happening - it isn't an error by itself.
-
-print("Loading embedding model...")
-
-try:
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
-except Exception as e:
-    print(f"STARTUP FAILED - could not load embedding model: {e}")
-    sys.exit(1)
-
-print("Embedding model loaded.")
-
-
-# -------------------------------------------------------
-# Connect Qdrant
-# -------------------------------------------------------
-
-print("Connecting to Qdrant...")
-
-try:
-    vector_store = QdrantVectorStore.from_existing_collection(
-        embedding=embeddings,
-        collection_name=COLLECTION_NAME,
-        url=QDRANT_URL,
-        api_key=QDRANT_API_KEY
-    )
-except Exception as e:
-    print(f"STARTUP FAILED - could not connect to Qdrant collection "
-          f"'{COLLECTION_NAME}': {e}")
-    print(
-        "Fix: confirm QDRANT_URL/QDRANT_API_KEY point at the same "
-        "cluster you originally uploaded chunks to from Colab, and "
-        "that the 'legal_knowledge' collection exists there."
-    )
-    sys.exit(1)
-
-print("Qdrant connected.")
-
-
-# -------------------------------------------------------
-# Uploads Collection (per-user-session PDF chunks)
-# -------------------------------------------------------
-# A single shared QdrantClient is used both for the low-level
-# collection-management calls below (create/delete) and, wrapped in
-# QdrantVectorStore, for the langchain add_documents/similarity_search
-# calls used in /upload and /chat.
-
-qdrant_client_instance = QdrantClient(
-    url=QDRANT_URL,
-    api_key=QDRANT_API_KEY
-)
-
-existing_collection_names = [
-    collection.name
-    for collection in qdrant_client_instance.get_collections().collections
-]
-
-if UPLOADS_COLLECTION_NAME not in existing_collection_names:
-
-    print(f"Creating '{UPLOADS_COLLECTION_NAME}' collection for uploaded PDFs...")
-
-    embedding_dimension = len(embeddings.embed_query("dimension probe"))
-
-    qdrant_client_instance.create_collection(
-        collection_name=UPLOADS_COLLECTION_NAME,
-        vectors_config=qdrant_models.VectorParams(
-            size=embedding_dimension,
-            distance=qdrant_models.Distance.COSINE
-        )
-    )
-
-    print(f"'{UPLOADS_COLLECTION_NAME}' collection created.")
-
-uploads_vector_store = QdrantVectorStore(
-    client=qdrant_client_instance,
-    collection_name=UPLOADS_COLLECTION_NAME,
-    embedding=embeddings
-)
-
-
-# -------------------------------------------------------
-# Mistral Client
-# -------------------------------------------------------
-
-print("Connecting to Mistral...")
-
-try:
-    mistral_client = MistralClient(api_key=MISTRAL_API_KEY)
-except Exception as e:
-    print(f"STARTUP FAILED - could not create Mistral client: {e}")
-    sys.exit(1)
-
-print("Mistral connected.")
-
-
-# -------------------------------------------------------
-# Speech Recognizer (for voice input)
-# -------------------------------------------------------
-# dynamic_energy_threshold lets the recognizer adapt its
-# silence/speech cutoff per-clip instead of using one fixed
-# threshold for every recording. This alone fixes a large
-# share of "Could not understand the audio" false negatives
-# caused by quieter mics or background noise.
-
-recognizer = sr.Recognizer()
-recognizer.dynamic_energy_threshold = True
-recognizer.energy_threshold = 300  # sane starting point, auto-adjusted below
-
-
-# -------------------------------------------------------
-# Uploaded Document Settings
-# -------------------------------------------------------
-
-MAX_UPLOAD_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB
-MAX_AUDIO_SIZE_BYTES = 10 * 1024 * 1024   # 10 MB
-
-MIN_AUDIO_DURATION_MS = 400  # clips shorter than this are almost never valid speech
-
-# Lightweight lookup so /chat and /remove-document can check "does this
-# session have an active uploaded document" without hitting Qdrant.
-# The actual chunk vectors live in the UPLOADS_COLLECTION_NAME
-# collection in Qdrant, tagged with metadata.session_id — this dict is
-# just a fast local index of which session_ids are currently active.
 active_upload_sessions = {}
-# structure: { session_id: {"filename": str, "chunks_indexed": int} }
 
+def clean_response(text: str) -> str:
+    """Clean and format the response for professional presentation"""
+    text = re.sub(r'\*\*', '', text)
+    text = re.sub(r'__', '', text)
+    text = re.sub(r'```', '', text)
+    text = re.sub(r'`', '', text)
+    text = re.sub(r'#{1,6}\s*', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r'\.(?=[A-Z])', '. ', text)
+    text = re.sub(r'^[\s]*[-•*]\s*', '  - ', text, flags=re.MULTILINE)
+    return text.strip()
 
-# -------------------------------------------------------
-# HTML Page
-# -------------------------------------------------------
+def format_official_response(answer: str, sources: list) -> str:
+    """Format the response in official legal document style"""
+    cleaned_answer = clean_response(answer)
+    response = []
+    response.append("LEGAL KNOWLEDGE TWIN")
+    response.append("")
+    response.append(f"Date: {datetime.now().strftime('%B %d, %Y')}")
+    response.append("")
+    response.append("DISCLAIMER: This information is for educational purposes only")
+    response.append("and does not constitute legal advice. Consult a qualified")
+    response.append("attorney for legal matters.")
+    response.append("")
+    response.append("")
 
-@app.route("/")
-def home():
-    return render_template("index.html")
+    sections = cleaned_answer.split('\n\n')
+    for section in sections:
+        if section.strip():
+            if any(keyword in section.lower() for keyword in ['summary', 'explanation', 'sources', 'guidance', 'action']):
+                lines = section.split('\n')
+                for i, line in enumerate(lines):
+                    if any(keyword in line.lower() for keyword in ['summary:', 'explanation:', 'sources:', 'guidance:', 'action:']):
+                        header = line.upper()
+                        lines[i] = f"\n{header}\n{'-' * len(header)}"
+                section = '\n'.join(lines)
+            response.append(section)
+            response.append("")
 
+    if sources and not any('source' in s.lower() for s in sections):
+        response.append("SOURCES REFERENCED")
+        response.append("-" * 20)
+        for i, source in enumerate(sources, 1):
+            response.append(f"  {i}. {source}")
+        response.append("")
 
-# -------------------------------------------------------
-# Health Check
-# -------------------------------------------------------
-# A cheap endpoint that doesn't touch Qdrant/Mistral - useful for
-# Render health checks or uptime monitors, and as a fast way to
-# confirm the process is actually up and serving requests.
+    response.append("Legal Knowledge Twin | AI-Powered Legal Assistant")
+    response.append("Based on Indian Legal Documents")
 
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok"})
+    return '\n'.join(response)
 
+def get_embedding(text: str) -> List[float]:
+    """Generate embeddings using OpenRouter API."""
+    models_to_try = [
+        "openai/text-embedding-3-small",
+        "openai/text-embedding-ada-002",
+        "cohere/embed-english-v3.0",
+    ]
+    last_error = None
+    for model in models_to_try:
+        for attempt in range(3):
+            try:
+                response = requests.post(
+                    "https://openrouter.ai/api/v1/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://colab.research.google.com",
+                        "X-Title": "Legal Knowledge Assistant"
+                    },
+                    json={"model": model, "input": text[:8192]},
+                    timeout=60
+                )
+                if response.status_code == 200:
+                    embedding_data = response.json()
+                    logger.info(f"Embedding generated using {model}")
+                    return embedding_data['data'][0]['embedding']
+                else:
+                    if attempt < 2:
+                        time.sleep(2 ** attempt)
+            except Exception as e:
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+                last_error = e
+    raise Exception(f"All embedding models failed: {last_error}")
 
-# -------------------------------------------------------
-# Upload API
-# -------------------------------------------------------
+def ask_llm(prompt: str) -> str:
+    """Try each model until one succeeds."""
+    chat_models = [
+        "meta-llama/llama-3.1-8b-instruct",
+        "mistralai/mistral-7b-instruct",
+        "nvidia/llama-3.2-nemotron-1b-v2",
+        "openai/gpt-4o-mini",
+    ]
+    for model in chat_models:
+        try:
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://colab.research.google.com",
+                    "X-Title": "Legal Knowledge Twin"
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": """You are a professional legal assistant for Indian law.
+Provide responses in official, formal language.
+Do not use markdown, emojis, or special symbols.
+Structure your response with these sections:
+SUMMARY: Brief overview of the legal position
+DETAILED EXPLANATION: Comprehensive explanation of the law
+LEGAL PROVISIONS: Relevant sections and provisions cited
+SOURCES: List of documents referenced
+PRACTICAL GUIDANCE: Actionable next steps for the user"""},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 1200,
+                },
+                timeout=60
+            )
+            if response.status_code == 200:
+                result = response.json()
+                answer = result['choices'][0]['message']['content']
+                logger.info(f"Answered by: {model}")
+                return answer
+            else:
+                logger.warning(f"Model {model} failed: {response.status_code}")
+        except Exception as e:
+            logger.warning(f"Model {model} failed: {str(e)[:60]}")
+            continue
+    return "Unable to generate response. Please try again."
 
-@app.route("/upload", methods=["POST"])
-def upload():
-
+def init_qdrant_collections():
+    """Initialize Qdrant collections."""
     try:
+        collections = qdrant_client.get_collections()
+        collection_names = [c.name for c in collections.collections]
 
-        if "file" not in request.files:
+        if COLLECTION_NAME not in collection_names:
+            logger.info(f"Creating {COLLECTION_NAME} collection...")
+            qdrant_client.create_collection(
+                collection_name=COLLECTION_NAME,
+                vectors_config=qdrant_models.VectorParams(
+                    size=1536,
+                    distance=qdrant_models.Distance.COSINE
+                )
+            )
+            logger.info(f"Created {COLLECTION_NAME} collection")
+        else:
+            logger.info(f"Collection {COLLECTION_NAME} already exists")
+
+        if UPLOADS_COLLECTION not in collection_names:
+            logger.info(f"Creating {UPLOADS_COLLECTION} collection...")
+            qdrant_client.create_collection(
+                collection_name=UPLOADS_COLLECTION,
+                vectors_config=qdrant_models.VectorParams(
+                    size=1536,
+                    distance=qdrant_models.Distance.COSINE
+                )
+            )
+            logger.info(f"Created {UPLOADS_COLLECTION} collection")
+        else:
+            logger.info(f"Collection {UPLOADS_COLLECTION} already exists")
+    except Exception as e:
+        logger.error(f"Qdrant initialization error: {e}")
+        raise
+
+init_qdrant_collections()
+
+@app.route('/')
+def home():
+    return render_template('index.html')
+
+@app.route('/static/<path:path>')
+def serve_static(path):
+    return send_from_directory('static', path)
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    try:
+        collection_info = qdrant_client.get_collection(COLLECTION_NAME)
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'qdrant': 'connected',
+            'collection': COLLECTION_NAME,
+            'total_points': collection_info.points_count
+        }), 200
+    except Exception as e:
+        return jsonify({'status': 'unhealthy', 'error': str(e)}), 500
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    try:
+        data = request.get_json() or {}
+        question = data.get('question', '').strip()
+        session_id = data.get('session_id', '')
+
+        if not question:
+            return jsonify({'status': 'error', 'message': 'Question is required'}), 400
+
+        # Determine collection
+        using_uploaded = session_id in active_upload_sessions
+        collection_name = UPLOADS_COLLECTION if using_uploaded else COLLECTION_NAME
+
+        # Build filter for uploaded documents
+        filter_condition = None
+        if using_uploaded:
+            filter_condition = qdrant_models.Filter(
+                must=[
+                    qdrant_models.FieldCondition(
+                        key='session_id',
+                        match=qdrant_models.MatchValue(value=session_id)
+                    )
+                ]
+            )
+
+        # Generate query embedding
+        query_embedding = get_embedding(question)
+
+        # Search Qdrant
+        search_results = qdrant_client.search(
+            collection_name=collection_name,
+            query_vector=query_embedding,
+            limit=6,
+            query_filter=filter_condition,
+            with_payload=True
+        )
+
+        if not search_results:
             return jsonify({
-                "status": "error",
-                "message": "No file was uploaded."
-            }), 400
+                'status': 'success',
+                'answer': 'I could not find relevant information in the documents to answer your question.',
+                'sources': [],
+                'source_mode': 'uploaded_document' if using_uploaded else 'knowledge_base'
+            }), 200
 
-        uploaded_file = request.files["file"]
+        # Prepare context
+        context_parts = []
+        sources = []
+        for hit in search_results:
+            payload = hit.payload
+            text = payload.get('text', '')
+            source = payload.get('source', 'Unknown')
+            page = payload.get('page', 0)
+            context_parts.append(f"[Source: {source} | Page {page + 1}]\n{text}")
+            if source not in sources:
+                sources.append(source)
 
-        if uploaded_file.filename == "":
-            return jsonify({
-                "status": "error",
-                "message": "No file was selected."
-            }), 400
+        context = '\n\n---\n\n'.join(context_parts)
 
-        if not uploaded_file.filename.lower().endswith(".pdf"):
-            return jsonify({
-                "status": "error",
-                "message": "Only PDF files are supported."
-            }), 400
+        # Build prompt
+        prompt = f"""You are a legal expert specializing in Indian law.
+Based solely on the provided legal context, provide a professional, authoritative response.
+
+LEGAL CONTEXT:
+{context}
+
+USER QUESTION:
+{question}
+
+REQUIRED RESPONSE FORMAT (use formal language, no symbols):
+SUMMARY:
+Begin with a concise summary of the legal position in 2 to 3 sentences.
+
+DETAILED EXPLANATION:
+Provide a comprehensive explanation of the relevant law, including:
+- The legal framework and its purpose
+- Key provisions and their interpretation
+- Applicable conditions and exceptions
+
+LEGAL PROVISIONS:
+List the specific sections, acts, or provisions that apply.
+
+PRACTICAL GUIDANCE:
+Explain what this means for the user, including:
+- Rights and obligations under the law
+- Recommended actions
+- Important considerations
+
+If the answer is not in the context, respond:
+"The provided legal documents do not contain information about this specific question."
+
+RESPONSE:"""
+
+        # Get answer from LLM
+        answer = ask_llm(prompt)
+
+        # Format as official response
+        formatted_answer = format_official_response(answer, sources)
+
+        return jsonify({
+            'status': 'success',
+            'answer': formatted_answer,
+            'sources': sources,
+            'source_mode': 'uploaded_document' if using_uploaded else 'knowledge_base'
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/upload', methods=['POST'])
+def upload_document():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'status': 'error', 'message': 'No file uploaded'}), 400
+
+        uploaded_file = request.files['file']
+        if uploaded_file.filename == '':
+            return jsonify({'status': 'error', 'message': 'No file selected'}), 400
+
+        if not uploaded_file.filename.lower().endswith('.pdf'):
+            return jsonify({'status': 'error', 'message': 'Only PDF files are supported'}), 400
 
         file_bytes = uploaded_file.read()
-
         if len(file_bytes) > MAX_UPLOAD_SIZE_BYTES:
             return jsonify({
-                "status": "error",
-                "message": "File is too large. Maximum size is 15 MB."
+                'status': 'error',
+                'message': f'File too large. Maximum size is {MAX_UPLOAD_SIZE_BYTES // (1024*1024)} MB'
             }), 400
 
+        # Extract text from PDF
         reader = PdfReader(io.BytesIO(file_bytes))
-
         session_id = str(uuid.uuid4())
-
         raw_documents = []
 
-        for page_index, page in enumerate(reader.pages):
-
-            page_text = page.extract_text() or ""
+        for page_num, page in enumerate(reader.pages):
+            page_text = page.extract_text() or ''
             page_text = page_text.strip()
+            if page_text:
+                raw_documents.append(
+                    Document(
+                        page_content=page_text,
+                        metadata={
+                            'source': uploaded_file.filename,
+                            'page': page_num,
+                            'session_id': session_id
+                        }
+                    )
+                )
 
-            if page_text == "":
-                continue
+        if not raw_documents:
+            return jsonify({
+                'status': 'error',
+                'message': 'No text could be extracted from the PDF'
+            }), 400
 
-            raw_documents.append(
-                Document(
-                    page_content=page_text,
-                    metadata={
-                        "source": uploaded_file.filename,
-                        "page": page_index,
-                        "session_id": session_id
+        # Split into chunks
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP,
+            separators=['\n\n', '\n', '.', ' ', '']
+        )
+        chunked_documents = splitter.split_documents(raw_documents)
+
+        # Generate embeddings and store in Qdrant
+        points = []
+        collection_info = qdrant_client.get_collection(UPLOADS_COLLECTION)
+        start_id = collection_info.points_count
+
+        for i, doc in enumerate(chunked_documents):
+            embedding = get_embedding(doc.page_content[:8000])
+            point_id = start_id + i
+            points.append(
+                qdrant_models.PointStruct(
+                    id=point_id,
+                    vector=embedding,
+                    payload={
+                        'text': doc.page_content,
+                        'source': doc.metadata.get('source', 'Unknown'),
+                        'page': doc.metadata.get('page', 0),
+                        'session_id': session_id,
+                        'chunk_index': i
                     }
                 )
             )
 
-        if len(raw_documents) == 0:
-            return jsonify({
-                "status": "error",
-                "message": "Could not extract any readable text from this PDF."
-            }), 400
-
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=150
-        )
-
-        chunked_documents = splitter.split_documents(raw_documents)
-
-        # Every chunk keeps the session_id metadata set above (the
-        # splitter carries metadata through), so it can be filtered
-        # and later deleted by session_id.
-        uploads_vector_store.add_documents(chunked_documents)
-
+        # Upload to Qdrant
+        qdrant_client.upsert(collection_name=UPLOADS_COLLECTION, points=points)
         active_upload_sessions[session_id] = {
-            "filename": uploaded_file.filename,
-            "chunks_indexed": len(chunked_documents)
+            'filename': uploaded_file.filename,
+            'chunks': len(chunked_documents)
         }
 
+        logger.info(f"Uploaded {uploaded_file.filename} with {len(chunked_documents)} chunks")
+
         return jsonify({
-            "status": "success",
-            "session_id": session_id,
-            "filename": uploaded_file.filename,
-            "chunks_indexed": len(chunked_documents)
-        })
+            'status': 'success',
+            'session_id': session_id,
+            'filename': uploaded_file.filename,
+            'chunks_indexed': len(chunked_documents)
+        }), 200
 
     except Exception as e:
+        logger.error(f"Upload error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
-
-
-# -------------------------------------------------------
-# Remove Uploaded Document
-# -------------------------------------------------------
-
-@app.route("/remove-document", methods=["POST"])
+@app.route('/remove-document', methods=['POST'])
 def remove_document():
-    # Call this whenever a document should stop being usable for
-    # future questions: user removes the attachment, or the chat
-    # widget is closed / a "new chat" is started on the frontend.
-    # It deletes the actual vectors from Qdrant (not just local
-    # bookkeeping), so no trace of that session's document remains.
-
     try:
-
         data = request.get_json(silent=True) or {}
-        session_id = data.get("session_id", "")
+        session_id = data.get('session_id', '')
 
-        if session_id == "":
-            return jsonify({"status": "success"})
+        if not session_id:
+            return jsonify({'status': 'success'})
 
-        qdrant_client_instance.delete(
-            collection_name=UPLOADS_COLLECTION_NAME,
+        qdrant_client.delete(
+            collection_name=UPLOADS_COLLECTION,
             points_selector=qdrant_models.FilterSelector(
                 filter=qdrant_models.Filter(
                     must=[
                         qdrant_models.FieldCondition(
-                            key="metadata.session_id",
+                            key='session_id',
                             match=qdrant_models.MatchValue(value=session_id)
                         )
                     ]
                 )
             )
         )
-
         active_upload_sessions.pop(session_id, None)
-
-        return jsonify({"status": "success"})
-
-    except Exception as e:
-
-        print(f"[remove-document] Failed to clean up session {session_id}: {e}")
-
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
-
-
-# -------------------------------------------------------
-# Voice Transcription API
-# -------------------------------------------------------
-# RENDER DEPLOYMENT NOTE: this endpoint decodes audio via pydub, which
-# shells out to the "ffmpeg" binary. Render's native Python runtime
-# does NOT include ffmpeg, so on a plain Python web service this route
-# will fail at the AudioSegment.from_file() call below (caught and
-# returned as a 400 "Could not decode the audio recording" - it will
-# not crash the whole app, only the /transcribe feature). To make
-# voice input work on Render you need to deploy via a Dockerfile that
-# installs ffmpeg (e.g. `apt-get install -y ffmpeg` in the image)
-# instead of the native Python runtime.
-#
-# Changes vs. the original version:
-#
-# 1. Ambient-noise calibration: recognizer.adjust_for_ambient_noise()
-#    is run against the first fraction of a second of the clip so the
-#    energy threshold adapts to that specific recording instead of
-#    using one static value for every user/mic.
-#
-# 2. Volume normalization: pydub's normalize() boosts quiet clips up
-#    to a consistent peak level before recognition. Quiet mic input
-#    was one of the most common causes of UnknownValueError.
-#
-# 3. Duration / silence guard: clips under MIN_AUDIO_DURATION_MS or
-#    clips that are near-silent (very low dBFS) are rejected with a
-#    specific, actionable message instead of the generic
-#    "could not understand" error, so you can tell from the response
-#    itself whether the mic/recorder is the problem.
-#
-# 4. Server-side logging of failures: prints the exception/detail to
-#    the server console (not to the client) so this is debuggable in
-#    production logs.
-
-@app.route("/transcribe", methods=["POST"])
-def transcribe():
-
-    input_audio_path = None
-    wav_audio_path = None
-
-    try:
-
-        if "audio" not in request.files:
-            return jsonify({
-                "status": "error",
-                "message": "No audio was received."
-            }), 400
-
-        audio_file = request.files["audio"]
-
-        audio_bytes = audio_file.read()
-
-        if len(audio_bytes) == 0:
-            return jsonify({
-                "status": "error",
-                "message": "Empty audio recording."
-            }), 400
-
-        if len(audio_bytes) > MAX_AUDIO_SIZE_BYTES:
-            return jsonify({
-                "status": "error",
-                "message": "Audio recording is too large."
-            }), 400
-
-        # ----------------------------------
-        # Save incoming audio to a temp file
-        # ----------------------------------
-
-        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as input_temp:
-            input_temp.write(audio_bytes)
-            input_audio_path = input_temp.name
-
-        # ----------------------------------
-        # Decode with ffmpeg (via pydub). Format is
-        # auto-detected from file content, not extension,
-        # so this works regardless of which codec the
-        # browser's MediaRecorder actually used.
-        # ----------------------------------
-
-        try:
-            audio_segment = AudioSegment.from_file(input_audio_path)
-        except Exception as decode_error:
-            print(f"[transcribe] ffmpeg decode failed: {decode_error}")
-            return jsonify({
-                "status": "error",
-                "message": "Could not decode the audio recording. Please try again."
-            }), 400
-
-        # ----------------------------------
-        # Reject clips that are too short to contain speech
-        # ----------------------------------
-
-        if len(audio_segment) < MIN_AUDIO_DURATION_MS:
-            return jsonify({
-                "status": "error",
-                "message": "Recording was too short. Please hold the mic button and speak for at least a second."
-            }), 400
-
-        # ----------------------------------
-        # Normalize volume, then check for near-silence
-        # ----------------------------------
-
-        audio_segment = audio_segment.set_channels(1).set_frame_rate(16000)
-        audio_segment = pydub_normalize(audio_segment)
-
-        if audio_segment.dBFS == float("-inf") or audio_segment.dBFS < -45:
-            return jsonify({
-                "status": "error",
-                "message": "Recording seems silent. Please check your microphone permissions and try again."
-            }), 400
-
-        wav_audio_path = input_audio_path + ".wav"
-        audio_segment.export(wav_audio_path, format="wav")
-
-        # ----------------------------------
-        # Transcribe using SpeechRecognition
-        # ----------------------------------
-
-        with sr.AudioFile(wav_audio_path) as source:
-            # Calibrate to this specific clip's noise floor before
-            # recording, instead of relying on a single fixed
-            # energy_threshold for every request.
-            recognizer.adjust_for_ambient_noise(source, duration=min(0.5, source.DURATION))
-            audio_data = recognizer.record(source)
-
-        try:
-            transcript = recognizer.recognize_google(audio_data, language="en-IN")
-        except sr.UnknownValueError:
-            print("[transcribe] recognize_google: UnknownValueError (no speech detected in clip)")
-            return jsonify({
-                "status": "error",
-                "message": "Could not understand the audio. Please speak clearly and try again."
-            }), 400
-        except sr.RequestError as e:
-            print(f"[transcribe] recognize_google: RequestError: {e}")
-            return jsonify({
-                "status": "error",
-                "message": f"Speech recognition service error: {str(e)}"
-            }), 503
-
-        return jsonify({
-            "status": "success",
-            "transcript": transcript
-        })
+        logger.info(f"Removed document for session {session_id}")
+        return jsonify({'status': 'success'})
 
     except Exception as e:
-
-        print(f"[transcribe] Unhandled error: {e}")
-
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
-
-    finally:
-
-        for path in (input_audio_path, wav_audio_path):
-            if path and os.path.exists(path):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
-
-
-# -------------------------------------------------------
-# Chat API
-# -------------------------------------------------------
-
-@app.route("/chat", methods=["POST"])
-def chat():
-
-    try:
-
-        data = request.get_json(silent=True) or {}
-
-        question = data.get("question", "")
-        question = question.strip() if isinstance(question, str) else ""
-
-        session_id = data.get("session_id", "")
-
-        if question == "":
-            return jsonify({
-                "status": "error",
-                "message": "Question is required."
-            }), 400
-
-        using_uploaded_document = session_id in active_upload_sessions
-
-        if using_uploaded_document:
-
-            # Filter restricts the search to chunks tagged with this
-            # exact session_id, so only the PDF this session uploaded
-            # can ever be retrieved here — not other sessions' uploads
-            # and not the main legal_knowledge collection.
-            session_filter = qdrant_models.Filter(
-                must=[
-                    qdrant_models.FieldCondition(
-                        key="metadata.session_id",
-                        match=qdrant_models.MatchValue(value=session_id)
-                    )
-                ]
-            )
-
-            docs = uploads_vector_store.similarity_search(
-                question,
-                k=5,
-                filter=session_filter
-            )
-
-        else:
-
-            docs = vector_store.similarity_search(
-                question,
-                k=5
-            )
-
-        context_blocks = []
-
-        for doc in docs:
-
-            source_name = doc.metadata.get("source", "Unknown Document")
-            page_number = doc.metadata.get("page", None)
-
-            if page_number is not None:
-                citation_label = f"[Source: {source_name} | Page {int(page_number) + 1}]"
-            else:
-                citation_label = f"[Source: {source_name}]"
-
-            context_blocks.append(f"{citation_label}\n{doc.page_content}")
-
-        context = "\n\n---\n\n".join(context_blocks)
-
-        prompt = f"""
-You are Legal Knowledge Twin.
-
-You are an expert AI legal assistant for Indian law.
-
-Answer ONLY from the supplied legal documents below. Do not hallucinate
-and do not use any outside knowledge.
-
-Each context block below is tagged with its exact source document name
-and page number in the format [Source: filename | Page N]. When you cite
-a source in your answer, copy that filename and page number exactly as
-given. Never invent, guess, or alter a source name or page number. If a
-context block has no page number listed, cite only the filename.
-
-Context:
-
-{context}
-
-User Question:
-
-{question}
-
-Formatting rules (follow strictly):
-- Plain text only. Do not use markdown symbols such as asterisks (*),
-  underscores (_), backticks, or hash symbols (#) anywhere in the answer.
-- Do not bold, italicize, or otherwise stylize any words.
-- Use plain section headers exactly as written below, followed by a
-  colon and a line break.
-
-Respond using this exact format:
-
-Summary:
-<short plain-text answer>
-
-Explanation:
-<clear plain-text explanation>
-
-Sources:
-<exact filename and page number for each source actually used, one per line>
-
-What should the user do next:
-<practical suggestion>
-
-If the answer is not available in the context, reply exactly:
-
-Sorry, I could not find this information in the uploaded legal documents.
-"""
-
-        response = mistral_client.chat(
-            model=MISTRAL_MODEL,
-            messages=[
-                ChatMessage(role="user", content=prompt)
-            ]
-        )
-
-        answer = response.choices[0].message.content
-
-        for symbol in ["**", "__", "`", "##", "#"]:
-            answer = answer.replace(symbol, "")
-
-        answer = answer.replace("*", "")
-
-        sources = []
-
-        for doc in docs:
-
-            source = doc.metadata.get("source", "Unknown")
-
-            if source not in sources:
-                sources.append(source)
-
-        return jsonify({
-
-            "status": "success",
-
-            "question": question,
-
-            "answer": answer,
-
-            "sources": sources,
-
-            "source_mode": "uploaded_document" if using_uploaded_document else "knowledge_base"
-
-        })
-
-    except Exception as e:
-
-        return jsonify({
-
-            "status": "error",
-
-            "message": str(e)
-
-        }), 500
-
-
-# -------------------------------------------------------
-# Run App
-# -------------------------------------------------------
-
-if __name__ == "__main__":
-    # This block only runs when you execute `python app.py` directly
-    # (e.g. local testing). On Render, gunicorn imports this module
-    # and calls the `app` object directly - this block is skipped,
-    # and the actual bind/port/host come from your Render Start
-    # Command instead, e.g.:
-    #   gunicorn --bind 0.0.0.0:$PORT --timeout 120 app:app
-    # The --timeout 120 is worth keeping in the Start Command since
-    # the first request after a cold start can be slow while the
-    # embedding model finishes warming up.
-
-    PORT = int(os.environ.get("PORT", 5000))
-
-    print(f"Server running on port {PORT}")
-
-    app.run(
-        host="0.0.0.0",
-        port=PORT,
-        debug=False
-    )
+        logger.error(f"Remove document error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
