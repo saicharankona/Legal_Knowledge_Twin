@@ -56,10 +56,11 @@ CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 MAX_UPLOAD_SIZE_BYTES = 15 * 1024 * 1024
 
-# Minimum cosine similarity a chunk must have to be considered "relevant".
-# Chunks scoring below this are dropped before the LLM ever sees them, so a
-# question the documents don't cover can't get "answered" from a weak/loose match.
-MIN_RELEVANCE_SCORE = 0.25
+# Minimum similarity a chunk must have to be considered "relevant". Configurable via
+# env var so it can be tuned from the Render dashboard without a code change/redeploy.
+# Left low by default (0.0 = no filtering) until real score logs show the right cutoff
+# for your embedding model/collection — see the "Top result score" log line in /chat.
+MIN_RELEVANCE_SCORE = float(os.getenv('MIN_RELEVANCE_SCORE', '0.0'))
 
 # The exact sentence returned whenever the documents don't contain the answer.
 # Kept as a constant so it's used identically everywhere (prompt, fallback checks).
@@ -318,16 +319,25 @@ def chat():
         # Generate query embedding
         query_embedding = get_embedding(question)
 
-        # Search Qdrant — score_threshold drops weakly-matching chunks so they
-        # never reach the LLM as "context" in the first place.
+        # Search Qdrant WITHOUT a server-side score_threshold, so we can see and log
+        # the real scores first. We filter client-side afterward — this avoids
+        # silently returning zero results if the threshold guess is off.
         search_results = qdrant_client.search(
             collection_name=collection_name,
             query_vector=query_embedding,
             limit=6,
             query_filter=filter_condition,
-            score_threshold=MIN_RELEVANCE_SCORE,
             with_payload=True
         )
+
+        if search_results:
+            top_scores = [round(hit.score, 4) for hit in search_results]
+            logger.info(f"Retrieved scores for question '{question[:50]}...': {top_scores}")
+        else:
+            logger.info(f"No Qdrant results at all for question '{question[:50]}...'")
+
+        # Apply the (configurable) relevance filter client-side
+        search_results = [hit for hit in search_results if hit.score >= MIN_RELEVANCE_SCORE]
 
         if not search_results:
             return jsonify({
@@ -390,15 +400,18 @@ RESPONSE:"""
         # Get answer from LLM
         answer = ask_llm(prompt)
 
-        # Safety net: if the model's answer doesn't actually contain the fallback
-        # sentence but also shares almost no vocabulary with the retrieved context,
-        # it's more likely reciting general knowledge than using the documents —
-        # in that case, prefer the honest fallback over a possibly ungrounded answer.
+        # Safety net: only steps in for the extreme case of essentially zero shared
+        # vocabulary between answer and context (a strong signal of pure recitation
+        # from training data rather than the documents). Loosened to a ratio-based
+        # check with a minimum context size, so short chunks and normal paraphrasing
+        # don't get falsely overridden to the fallback message.
         context_words = set(re.findall(r'[a-z]{5,}', context.lower()))
         answer_words = set(re.findall(r'[a-z]{5,}', answer.lower()))
         overlap = len(context_words & answer_words)
-        if NOT_FOUND_MESSAGE not in answer and context_words and overlap < 3:
-            logger.warning("Answer had minimal overlap with retrieved context; using fallback")
+        overlap_ratio = overlap / len(context_words) if context_words else 1
+        logger.info(f"Context/answer overlap: {overlap} words ({overlap_ratio:.1%} of context vocab)")
+        if NOT_FOUND_MESSAGE not in answer and len(context_words) >= 15 and overlap_ratio < 0.03:
+            logger.warning("Answer had near-zero overlap with retrieved context; using fallback")
             answer = NOT_FOUND_MESSAGE
 
         # Format as official response
