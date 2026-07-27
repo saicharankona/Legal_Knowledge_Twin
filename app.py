@@ -56,7 +56,17 @@ CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 MAX_UPLOAD_SIZE_BYTES = 15 * 1024 * 1024
 
+# Minimum cosine similarity a chunk must have to be considered "relevant".
+# Chunks scoring below this are dropped before the LLM ever sees them, so a
+# question the documents don't cover can't get "answered" from a weak/loose match.
+MIN_RELEVANCE_SCORE = 0.25
+
+# The exact sentence returned whenever the documents don't contain the answer.
+# Kept as a constant so it's used identically everywhere (prompt, fallback checks).
+NOT_FOUND_MESSAGE = "The provided legal documents do not contain information about this specific question."
+
 active_upload_sessions = {}
+
 
 def clean_response(text: str) -> str:
     """Clean and format the response for professional presentation"""
@@ -69,6 +79,7 @@ def clean_response(text: str) -> str:
     text = re.sub(r'\.(?=[A-Z])', '. ', text)
     text = re.sub(r'^[\s]*[-•*]\s*', '  - ', text, flags=re.MULTILINE)
     return text.strip()
+
 
 def format_official_response(answer: str, sources: list) -> str:
     """Format the response in official legal document style"""
@@ -109,6 +120,7 @@ def format_official_response(answer: str, sources: list) -> str:
 
     return '\n'.join(response)
 
+
 def get_embedding(text: str) -> List[float]:
     """Generate embeddings using OpenRouter API."""
     models_to_try = [
@@ -144,6 +156,7 @@ def get_embedding(text: str) -> List[float]:
                 last_error = e
     raise Exception(f"All embedding models failed: {last_error}")
 
+
 def ask_llm(prompt: str) -> str:
     """Try each model until one succeeds."""
     chat_models = [
@@ -152,6 +165,32 @@ def ask_llm(prompt: str) -> str:
         "nvidia/llama-3.2-nemotron-1b-v2",
         "openai/gpt-4o-mini",
     ]
+    # Hardened system prompt: explicitly forbids falling back on the model's own
+    # training knowledge of Indian law, and requires the exact fallback sentence
+    # (word-for-word) whenever the supplied context doesn't clearly answer the question.
+    system_prompt = f"""You are a document-grounded legal assistant for Indian law.
+
+STRICT RULES (do not break these under any circumstance):
+1. Answer using ONLY the information contained in the LEGAL CONTEXT provided in the user message.
+2. Do NOT use any legal knowledge you have from training. Even if you recognize the topic
+   and know the general legal position, you must ignore that knowledge and rely only on
+   the supplied context.
+3. Do NOT infer, extrapolate, or fill gaps with assumptions beyond what the context states.
+4. If the LEGAL CONTEXT does not clearly and directly answer the question, you MUST respond
+   with exactly this sentence and nothing else:
+   "{NOT_FOUND_MESSAGE}"
+5. Never mix in outside examples, sections, or acts that are not explicitly present in the
+   supplied context, even if they seem relevant.
+
+When the context IS sufficient, provide responses in official, formal language.
+Do not use markdown, emojis, or special symbols.
+Structure your response with these sections:
+SUMMARY: Brief overview of the legal position, using only facts drawn from the context
+DETAILED EXPLANATION: Comprehensive explanation using only the supplied context
+LEGAL PROVISIONS: Only sections/provisions that literally appear in the context
+SOURCES: List of documents referenced (from the context)
+PRACTICAL GUIDANCE: Actionable next steps for the user, based only on the context"""
+
     for model in chat_models:
         try:
             response = requests.post(
@@ -165,18 +204,10 @@ def ask_llm(prompt: str) -> str:
                 json={
                     "model": model,
                     "messages": [
-                        {"role": "system", "content": """You are a professional legal assistant for Indian law.
-Provide responses in official, formal language.
-Do not use markdown, emojis, or special symbols.
-Structure your response with these sections:
-SUMMARY: Brief overview of the legal position
-DETAILED EXPLANATION: Comprehensive explanation of the law
-LEGAL PROVISIONS: Relevant sections and provisions cited
-SOURCES: List of documents referenced
-PRACTICAL GUIDANCE: Actionable next steps for the user"""},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
-                    "temperature": 0.1,
+                    "temperature": 0.0,
                     "max_tokens": 1200,
                 },
                 timeout=60
@@ -191,7 +222,8 @@ PRACTICAL GUIDANCE: Actionable next steps for the user"""},
         except Exception as e:
             logger.warning(f"Model {model} failed: {str(e)[:60]}")
             continue
-    return "Unable to generate response. Please try again."
+    return NOT_FOUND_MESSAGE
+
 
 def init_qdrant_collections():
     """Initialize Qdrant collections."""
@@ -228,15 +260,19 @@ def init_qdrant_collections():
         logger.error(f"Qdrant initialization error: {e}")
         raise
 
+
 init_qdrant_collections()
+
 
 @app.route('/')
 def home():
     return render_template('index.html')
 
+
 @app.route('/static/<path:path>')
 def serve_static(path):
     return send_from_directory('static', path)
+
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -251,6 +287,7 @@ def health_check():
         }), 200
     except Exception as e:
         return jsonify({'status': 'unhealthy', 'error': str(e)}), 500
+
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -281,19 +318,21 @@ def chat():
         # Generate query embedding
         query_embedding = get_embedding(question)
 
-        # Search Qdrant
+        # Search Qdrant — score_threshold drops weakly-matching chunks so they
+        # never reach the LLM as "context" in the first place.
         search_results = qdrant_client.search(
             collection_name=collection_name,
             query_vector=query_embedding,
             limit=6,
             query_filter=filter_condition,
+            score_threshold=MIN_RELEVANCE_SCORE,
             with_payload=True
         )
 
         if not search_results:
             return jsonify({
                 'status': 'success',
-                'answer': 'I could not find relevant information in the documents to answer your question.',
+                'answer': NOT_FOUND_MESSAGE,
                 'sources': [],
                 'source_mode': 'uploaded_document' if using_uploaded else 'knowledge_base'
             }), 200
@@ -312,42 +351,55 @@ def chat():
 
         context = '\n\n---\n\n'.join(context_parts)
 
-        # Build prompt
-        prompt = f"""You are a legal expert specializing in Indian law.
-Based solely on the provided legal context, provide a professional, authoritative response.
-
-LEGAL CONTEXT:
+        # Build prompt — reiterate the strict grounding rule at the point of use,
+        # not just in the system message, since some models weight the most
+        # recent instruction more heavily.
+        prompt = f"""LEGAL CONTEXT (this is the ONLY information you may use):
 {context}
 
 USER QUESTION:
 {question}
 
-REQUIRED RESPONSE FORMAT (use formal language, no symbols):
+Answer using ONLY the LEGAL CONTEXT above. Do not use any outside knowledge of Indian
+law, even if you are confident about it — if it is not explicitly stated above, treat it
+as unknown. If the context above does not clearly and directly answer the question,
+respond with exactly:
+"{NOT_FOUND_MESSAGE}"
+
+Otherwise, use this format (formal language, no symbols):
 SUMMARY:
-Begin with a concise summary of the legal position in 2 to 3 sentences.
+Begin with a concise summary of the legal position in 2 to 3 sentences, drawn only from the context.
 
 DETAILED EXPLANATION:
-Provide a comprehensive explanation of the relevant law, including:
-- The legal framework and its purpose
-- Key provisions and their interpretation
-- Applicable conditions and exceptions
+Provide a comprehensive explanation using only what appears in the context, including:
+- The legal framework and its purpose, as stated in the context
+- Key provisions and their interpretation, as stated in the context
+- Applicable conditions and exceptions, as stated in the context
 
 LEGAL PROVISIONS:
-List the specific sections, acts, or provisions that apply.
+List only the specific sections, acts, or provisions that literally appear in the context above.
 
 PRACTICAL GUIDANCE:
-Explain what this means for the user, including:
-- Rights and obligations under the law
+Explain what this means for the user, based only on the context, including:
+- Rights and obligations under the law as described in the context
 - Recommended actions
 - Important considerations
-
-If the answer is not in the context, respond:
-"The provided legal documents do not contain information about this specific question."
 
 RESPONSE:"""
 
         # Get answer from LLM
         answer = ask_llm(prompt)
+
+        # Safety net: if the model's answer doesn't actually contain the fallback
+        # sentence but also shares almost no vocabulary with the retrieved context,
+        # it's more likely reciting general knowledge than using the documents —
+        # in that case, prefer the honest fallback over a possibly ungrounded answer.
+        context_words = set(re.findall(r'[a-z]{5,}', context.lower()))
+        answer_words = set(re.findall(r'[a-z]{5,}', answer.lower()))
+        overlap = len(context_words & answer_words)
+        if NOT_FOUND_MESSAGE not in answer and context_words and overlap < 3:
+            logger.warning("Answer had minimal overlap with retrieved context; using fallback")
+            answer = NOT_FOUND_MESSAGE
 
         # Format as official response
         formatted_answer = format_official_response(answer, sources)
@@ -362,6 +414,7 @@ RESPONSE:"""
     except Exception as e:
         logger.error(f"Chat error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 @app.route('/upload', methods=['POST'])
 def upload_document():
@@ -459,6 +512,7 @@ def upload_document():
         logger.error(f"Upload error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+
 @app.route('/remove-document', methods=['POST'])
 def remove_document():
     try:
@@ -488,6 +542,7 @@ def remove_document():
     except Exception as e:
         logger.error(f"Remove document error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
