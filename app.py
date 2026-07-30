@@ -47,7 +47,21 @@ if missing_vars:
 
 # Initialize Gemini
 genai.configure(api_key=GEMINI_API_KEY)
-gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+GEMINI_MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
+
+gemini_model = None
+for name in GEMINI_MODEL_CANDIDATES:
+    try:
+        candidate = genai.GenerativeModel(name)
+        candidate.generate_content("test")  # quick sanity check
+        gemini_model = candidate
+        logger.info(f"Using Gemini model: {name}")
+        break
+    except Exception as e:
+        logger.warning(f"Model {name} unavailable: {e}")
+
+if gemini_model is None:
+    raise RuntimeError("No available Gemini model found")
 
 # Initialize Qdrant
 qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
