@@ -10,13 +10,6 @@ from datetime import datetime
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
-import google.generativeai as genai
-from google.api_core.exceptions import (
-    ResourceExhausted,
-    PermissionDenied,
-    NotFound,
-    GoogleAPIError,
-)
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
 import requests
@@ -39,55 +32,43 @@ app = Flask(__name__, template_folder='templates', static_folder='static')
 CORS(app)
 
 # Environment variables
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 QDRANT_URL = os.getenv('QDRANT_URL')
 QDRANT_API_KEY = os.getenv('QDRANT_API_KEY')
 
 # Validate environment variables
-required_vars = ['GEMINI_API_KEY', 'OPENROUTER_API_KEY', 'QDRANT_URL', 'QDRANT_API_KEY']
+required_vars = ['OPENROUTER_API_KEY', 'QDRANT_URL', 'QDRANT_API_KEY']
 missing_vars = [var for var in required_vars if not os.getenv(var)]
 if missing_vars:
     raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
-# Initialize Gemini
-genai.configure(api_key=GEMINI_API_KEY)
-
-# --- Gemini model selection -------------------------------------------------
-# Ordered by preference. We do NOT make a live test call to any of these at
-# startup - that burns free-tier quota on every deploy/restart and can crash
-# the app before it ever serves a request. Instead we lazily instantiate the
-# first candidate, and only fall through to the next candidate at REQUEST
-# TIME if the current one actually fails (quota exhausted, access denied,
-# model retired, etc). This keeps startup fast/free and makes the app
-# resilient to any single model having problems.
-GEMINI_MODEL_CANDIDATES = [
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-flash-latest',
+# --- OpenRouter chat model selection -----------------------------------------
+# Ordered by preference. Free-tier availability on OpenRouter rotates fairly
+# often, so this is a candidate list rather than a single hardcoded model.
+# We do NOT make a live test call to any of these at startup - that burns
+# free-tier quota on every deploy/restart and can crash the app before it
+# ever serves a request. Instead we track the current preferred candidate,
+# and only fall through to the next one at REQUEST TIME if the current one
+# actually fails (quota exhausted, model retired, provider error, etc).
+# Check openrouter.ai/models (filter: Price -> Free) periodically and update
+# this list if any of these get pulled or renamed.
+OPENROUTER_MODEL_CANDIDATES = [
+    'openai/gpt-oss-20b:free',
+    'meta-llama/llama-4-maverick:free',
+    'deepseek/deepseek-r1-distill:free',
+    'openrouter/free',  # OpenRouter's own auto-router as a last-resort catch-all
 ]
 
-# Index into GEMINI_MODEL_CANDIDATES of the model we currently believe works.
-# Starts at 0 and only advances when a call actually fails, so we don't pay
-# any extra cost in the common case where the first model is fine.
+# Index into OPENROUTER_MODEL_CANDIDATES of the model we currently believe works.
 _current_model_index = 0
-_model_cache = {}
 
 
-def _get_model(index: int):
-    """Lazily construct (and cache) a GenerativeModel for a candidate index."""
-    if index not in _model_cache:
-        name = GEMINI_MODEL_CANDIDATES[index]
-        _model_cache[index] = genai.GenerativeModel(name)
-    return _model_cache[index]
-
-
-def generate_with_fallback(prompt: str, max_retries_per_model: int = 2):
+def generate_with_fallback(prompt: str, max_retries_per_model: int = 2) -> str:
     """
-    Generate content using the current preferred Gemini model, retrying on
-    transient errors (rate limits) and falling back to the next candidate
-    model on persistent/hard failures (quota exhausted after retries,
-    permission denied, model not found/retired).
+    Generate content using the current preferred OpenRouter free model,
+    retrying on transient errors (rate limits) and falling back to the next
+    candidate model on persistent/hard failures (quota exhausted after
+    retries, model not found/retired, provider error).
 
     Raises the last encountered exception if every candidate is exhausted.
     """
@@ -95,46 +76,75 @@ def generate_with_fallback(prompt: str, max_retries_per_model: int = 2):
 
     last_error: Optional[Exception] = None
 
-    for offset in range(len(GEMINI_MODEL_CANDIDATES)):
-        model_index = (_current_model_index + offset) % len(GEMINI_MODEL_CANDIDATES)
-        model_name = GEMINI_MODEL_CANDIDATES[model_index]
-        model = _get_model(model_index)
+    for offset in range(len(OPENROUTER_MODEL_CANDIDATES)):
+        model_index = (_current_model_index + offset) % len(OPENROUTER_MODEL_CANDIDATES)
+        model_name = OPENROUTER_MODEL_CANDIDATES[model_index]
 
         for attempt in range(max_retries_per_model):
             try:
-                response = model.generate_content(prompt)
-                if offset != 0:
-                    # A fallback model worked - make it the new default so
-                    # subsequent requests don't re-pay the cost of retrying
-                    # the broken one first.
-                    logger.info(f"Switching default Gemini model to: {model_name}")
-                    _current_model_index = model_index
-                return response
-
-            except ResourceExhausted as e:
-                # 429 - rate limit / quota. Worth a short retry, then move on
-                # to the next model rather than blocking the request forever.
-                last_error = e
-                logger.warning(
-                    f"Quota/rate limit hit on {model_name} "
-                    f"(attempt {attempt + 1}/{max_retries_per_model}): {e}"
+                response = requests.post(
+                    url="https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://colab.research.google.com",
+                        "X-Title": "Legal Knowledge Assistant"
+                    },
+                    json={
+                        "model": model_name,
+                        "messages": [
+                            {"role": "user", "content": prompt}
+                        ]
+                    },
+                    timeout=60
                 )
-                if attempt < max_retries_per_model - 1:
-                    time.sleep(20)
-                    continue
-                break  # exhausted retries for this model, try next candidate
 
-            except (PermissionDenied, NotFound) as e:
-                # 403 / 404 - this model/project combo is not usable at all.
-                # No point retrying, move straight to the next candidate.
-                last_error = e
-                logger.warning(f"Model {model_name} unavailable ({e.__class__.__name__}): {e}")
-                break
+                if response.status_code == 200:
+                    data = response.json()
+                    text = data['choices'][0]['message']['content']
+                    if offset != 0:
+                        # A fallback model worked - make it the new default so
+                        # subsequent requests don't re-pay the cost of retrying
+                        # the broken one first.
+                        logger.info(f"Switching default OpenRouter model to: {model_name}")
+                        _current_model_index = model_index
+                    return text
 
-            except GoogleAPIError as e:
+                elif response.status_code == 429:
+                    # Rate limit / quota. Worth a short retry, then move on
+                    # to the next model rather than blocking the request forever.
+                    last_error = Exception(f"Rate limited on {model_name}: {response.text}")
+                    logger.warning(
+                        f"Rate limit hit on {model_name} "
+                        f"(attempt {attempt + 1}/{max_retries_per_model}): {response.text}"
+                    )
+                    if attempt < max_retries_per_model - 1:
+                        time.sleep(20)
+                        continue
+                    break  # exhausted retries for this model, try next candidate
+
+                elif response.status_code in (401, 403, 404):
+                    # This model/key combo is not usable at all. No point
+                    # retrying, move straight to the next candidate.
+                    last_error = Exception(f"Model {model_name} unavailable ({response.status_code}): {response.text}")
+                    logger.warning(f"Model {model_name} unavailable ({response.status_code}): {response.text}")
+                    break
+
+                else:
+                    last_error = Exception(f"OpenRouter error on {model_name}: {response.status_code} {response.text}")
+                    logger.warning(
+                        f"OpenRouter API error on {model_name} "
+                        f"(attempt {attempt + 1}/{max_retries_per_model}): {response.status_code} {response.text}"
+                    )
+                    if attempt < max_retries_per_model - 1:
+                        time.sleep(5)
+                        continue
+                    break
+
+            except requests.RequestException as e:
                 last_error = e
                 logger.warning(
-                    f"Gemini API error on {model_name} "
+                    f"Request error on {model_name} "
                     f"(attempt {attempt + 1}/{max_retries_per_model}): {e}"
                 )
                 if attempt < max_retries_per_model - 1:
@@ -142,8 +152,8 @@ def generate_with_fallback(prompt: str, max_retries_per_model: int = 2):
                     continue
                 break
 
-    logger.error(f"All Gemini model candidates failed. Last error: {last_error}")
-    raise last_error if last_error else RuntimeError("Gemini generation failed for unknown reasons")
+    logger.error(f"All OpenRouter model candidates failed. Last error: {last_error}")
+    raise last_error if last_error else RuntimeError("OpenRouter generation failed for unknown reasons")
 
 
 # Initialize Qdrant
@@ -278,7 +288,7 @@ def health_check():
             'qdrant': 'connected',
             'collection': COLLECTION_NAME,
             'total_points': collection_info.points_count,
-            'gemini_model': GEMINI_MODEL_CANDIDATES[_current_model_index]
+            'llm_model': OPENROUTER_MODEL_CANDIDATES[_current_model_index]
         }), 200
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -499,7 +509,7 @@ def chat():
 
         context = '\n\n---\n\n'.join(context_parts)
 
-        # Generate response with Gemini
+        # Generate response with OpenRouter (free model)
         prompt = f"""You are Legal Knowledge Twin, an expert AI assistant for Indian law.
 
 You MUST answer ONLY from the supplied legal context.
@@ -557,10 +567,9 @@ Begin your response.
 """
 
         try:
-            response = generate_with_fallback(prompt)
-            answer = response.text
+            answer = generate_with_fallback(prompt)
         except Exception as e:
-            logger.error(f"All Gemini models failed for /chat: {e}")
+            logger.error(f"All OpenRouter models failed for /chat: {e}")
             return jsonify({
                 'status': 'error',
                 'message': 'The AI service is temporarily unavailable (rate limit or access issue). Please try again shortly.'
