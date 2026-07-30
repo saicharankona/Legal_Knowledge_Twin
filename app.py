@@ -1,8 +1,4 @@
-# CELL 9: CREATE FLASK APP (SCROLL-BASED FIX)
 import os
-from pathlib import Path
-
-app_code = '''import os
 import io
 import uuid
 import logging
@@ -469,20 +465,3 @@ Begin your response.
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-'''
-
-# Write app.py to project directory
-with open(PROJECT_ROOT / 'app.py', 'w') as f:
-    f.write(app_code)
-
-print("=" * 60)
-print("✅ APP.PY CREATED SUCCESSFULLY!")
-print("=" * 60)
-print(f"📁 Location: {PROJECT_ROOT / 'app.py'}")
-print("📋 Features:")
-print("  • Professional legal Q&A with RAG")
-print("  • Upload custom PDF documents")
-print("  • Official legal opinion format")
-print("  • Source attribution")
-print("  • Fixed compatibility issues - no filter parameter")
-print("=" * 60)
