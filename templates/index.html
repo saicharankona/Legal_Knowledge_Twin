@@ -1668,8 +1668,8 @@
                         <p>👋 Welcome!</p>
                         <p>I am your Legal Knowledge Twin.</p>
                         <p>Ask me anything related to the selected legal document.</p>
-                        <p>You can also upload your own legal PDF using the paperclip icon, or use the microphone to ask
-                            by voice.</p>
+                        <p>You can also upload your own legal PDF or a photo of a document using the paperclip icon,
+                            or use the microphone to ask by voice.</p>
                         <div class="citation">Source : Selected Legal PDF</div>
                     </div>
                 </div>
@@ -1680,8 +1680,8 @@
             </div>
 
             <div class="input-area">
-                <input type="file" id="fileInput" accept="application/pdf" style="display:none;">
-                <button id="uploadBtn" class="icon-btn" title="Upload a legal PDF to ask questions about it">
+                <input type="file" id="fileInput" accept="application/pdf,image/jpeg,image/png,image/webp,image/bmp" style="display:none;">
+                <button id="uploadBtn" class="icon-btn" title="Upload a legal PDF or photo of a document">
                     <i class="fas fa-paperclip"></i>
                 </button>
                 <button id="voiceBtn" class="icon-btn" title="Ask by voice">
@@ -1812,6 +1812,20 @@
 
         let currentSessionId = null;
         let currentDocFilename = null;
+        let lastAnswerText = "";
+
+        // ----------------------------------
+        // Voice OUTPUT: read text aloud using the browser's built-in
+        // speech synthesis. No backend involved.
+        // ----------------------------------
+        function speak(text) {
+            if (!window.speechSynthesis || !text) return;
+            window.speechSynthesis.cancel(); // stop anything currently being read
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            window.speechSynthesis.speak(utterance);
+        }
 
         questionInput.addEventListener("keydown", function (event) {
             if (event.key === "Enter") {
@@ -1828,13 +1842,18 @@
             fileInput.click();
         });
 
+        const ALLOWED_UPLOAD_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".webp", ".bmp"];
+
         fileInput.addEventListener("change", async () => {
 
             const file = fileInput.files[0];
             if (!file) return;
 
-            if (!file.name.toLowerCase().endsWith(".pdf")) {
-                addBotMessage("Only PDF files are supported. Please choose a .pdf file.", "Error");
+            const lowerName = file.name.toLowerCase();
+            const isAllowed = ALLOWED_UPLOAD_EXTENSIONS.some(ext => lowerName.endsWith(ext));
+
+            if (!isAllowed) {
+                addBotMessage("Only PDF and image files (jpg, png, webp, bmp) are supported.", "Error");
                 fileInput.value = "";
                 return;
             }
@@ -1966,7 +1985,9 @@
                         }
 
                         questionInput.value = data.transcript;
-                        sendQuestion();
+                        if (!handleVoiceCommand(data.transcript)) {
+                            sendQuestion();
+                        }
                     }
                     catch (error) {
                         typing.style.display = "none";
@@ -1989,6 +2010,55 @@
                 mediaRecorder.stop();
             }
             voiceBtn.classList.remove("listening");
+        }
+
+        // ----------------------------------
+        // Simple voice command router. Returns true if the transcript was
+        // handled as a command (so sendQuestion() should NOT run for it),
+        // false if it should be treated as an ordinary legal question.
+        // ----------------------------------
+        function handleVoiceCommand(transcript) {
+            const lower = transcript.trim().toLowerCase();
+
+            if (lower.includes("go to home") || lower.includes("open home") || lower === "home") {
+                showPage("home");
+                speak("Showing the home page.");
+                return true;
+            }
+            if (lower.includes("go to about") || lower.includes("open about") || lower.includes("about page")) {
+                showPage("about");
+                speak("Showing the about page.");
+                return true;
+            }
+            if (lower.includes("go to contact") || lower.includes("open contact") || lower.includes("contact page")) {
+                showPage("contact");
+                speak("Showing the contact page.");
+                return true;
+            }
+            if (lower.includes("open chat") || lower.includes("open assistant") || lower.includes("get started") || lower.includes("start chat")) {
+                showPage("chatbot");
+                speak("Opening the assistant.");
+                return true;
+            }
+            if (lower.includes("upload") && (lower.includes("document") || lower.includes("file") || lower.includes("photo") || lower.includes("picture"))) {
+                uploadBtn.click();
+                speak("Opening the file picker.");
+                return true;
+            }
+            if (lower.includes("read that again") || lower.includes("repeat that") || lower.includes("read the answer")) {
+                speak(lastAnswerText || "There is no previous answer to read yet.");
+                return true;
+            }
+            if (lower.includes("stop talking") || lower.includes("stop reading") || lower === "stop") {
+                if (window.speechSynthesis) window.speechSynthesis.cancel();
+                return true;
+            }
+            if (lower === "remove document" || lower.includes("remove the document") || lower.includes("clear document")) {
+                if (currentSessionId) removeDocBtn.click();
+                return true;
+            }
+
+            return false;
         }
 
         if (navigator.mediaDevices && window.MediaRecorder) {
@@ -2069,6 +2139,7 @@
             const div = document.createElement("div");
             div.className = "bot-message";
 
+            lastAnswerText = answer;
             const formattedAnswer = escapeHtml(answer).replace(/\n/g, "<br>");
 
             div.innerHTML = `
@@ -2076,9 +2147,16 @@
         <div class="message">
             <p>${formattedAnswer}</p>
             <div class="citation"><strong>Source:</strong> ${escapeHtml(source)}</div>
+            <button class="speak-btn" title="Read this answer aloud">
+                <i class="fas fa-volume-high"></i> Read Aloud
+            </button>
         </div>
     `;
             chatBox.appendChild(div);
+
+            const speakBtn = div.querySelector(".speak-btn");
+            speakBtn.addEventListener("click", () => speak(answer));
+
             scrollBottom();
         }
 
